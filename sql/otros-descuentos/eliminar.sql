@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_OTRO_DESCUENTO
+WHERE ode_correlativo = ?;

@@ -1,0 +1,2 @@
+DELETE FROM RPJ_CAT_PARAMETRO_PLANILLA
+WHERE ppl_correlativo = ?;

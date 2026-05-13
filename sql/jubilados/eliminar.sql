@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_JUBILADO
+WHERE jub_correlativo = ?;

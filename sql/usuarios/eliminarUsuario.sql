@@ -1,0 +1,1 @@
+-- Query base para eliminar usuario.

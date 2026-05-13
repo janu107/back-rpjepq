@@ -1,0 +1,3 @@
+UPDATE RPJ_CAT_MANEJO_ADMINISTRACION
+SET man_descripcion = ?
+WHERE man_id = ?;

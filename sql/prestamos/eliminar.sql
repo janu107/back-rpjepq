@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_PRESTAMO
+WHERE pre_correlativo = ?;

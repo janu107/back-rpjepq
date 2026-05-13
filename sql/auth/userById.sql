@@ -1,0 +1,1 @@
+-- Query base para obtener usuario por ID.

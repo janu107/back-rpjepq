@@ -1,0 +1,2 @@
+DELETE FROM RPJ_CAT_AREA
+WHERE are_id = ?;

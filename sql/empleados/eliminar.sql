@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_EMPLEADO
+WHERE emp_correlativo = ?;

@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_APORTACION_EPQ
+WHERE apo_correlativo = ?;

@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_JUNTA_DIRECTIVA
+WHERE jun_correlativo = ?;

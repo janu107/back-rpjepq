@@ -1,0 +1,2 @@
+DELETE FROM RPJ_MNT_SALARIO
+WHERE sal_correlativo = ?;

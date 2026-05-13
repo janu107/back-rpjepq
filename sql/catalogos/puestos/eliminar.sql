@@ -1,0 +1,2 @@
+DELETE FROM RPJ_CAT_PUESTO
+WHERE pue_id = ?;

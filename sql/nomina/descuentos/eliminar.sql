@@ -1,0 +1,2 @@
+DELETE FROM RPJ_PRC_NOMINA_DESCUENTO
+WHERE nde_correlativo = ?;
