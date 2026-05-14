@@ -8,6 +8,8 @@ const notFoundHandler = (req, res, next) => {
 
 const errorHandler = (err, req, res, next) => {
   const status = err.status || 500;
+  const isProduction = process.env.NODE_ENV === "production";
+  const publicMessage = status >= 500 && isProduction ? "Error interno del servidor" : err.message || "Error interno del servidor";
 
   logger.error("Error capturado por middleware global", {
     status,
@@ -19,8 +21,8 @@ const errorHandler = (err, req, res, next) => {
 
   res.status(status).json({
     ok: false,
-    message: err.message || "Error interno del servidor",
-    error: process.env.NODE_ENV === "development" ? err.stack : undefined
+    message: publicMessage,
+    error: !isProduction && status < 500 ? err.message : undefined
   });
 };
 

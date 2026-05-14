@@ -1,11 +1,13 @@
 const { Router } = require("express");
 const controller = require("../controllers/salarios.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
+const { auditAction } = require("../middlewares/audit.middleware");
+const { authorizeRoles } = require("../middlewares/role.middleware");
 const router = Router();
 router.use(authMiddleware);
-router.get("/", controller.list);
-router.get("/:id", controller.getById);
-router.post("/", controller.create);
-router.put("/:id", controller.update);
-router.delete("/:id", controller.remove);
+router.get("/", authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"), controller.list);
+router.get("/:id", authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"), controller.getById);
+router.post("/", authorizeRoles("ADMIN", "OPERADOR"), auditAction("SALARIOS", "CREAR"), controller.create);
+router.put("/:id", authorizeRoles("ADMIN", "OPERADOR"), auditAction("SALARIOS", "EDITAR"), controller.update);
+router.delete("/:id", authorizeRoles("ADMIN"), auditAction("SALARIOS", "ELIMINAR"), controller.remove);
 module.exports = router;

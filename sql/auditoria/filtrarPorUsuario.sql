@@ -1,0 +1,4 @@
+SELECT DISTINCT aud_usuario
+FROM RPJ_SEG_AUDITORIA
+WHERE aud_usuario IS NOT NULL
+ORDER BY aud_usuario;

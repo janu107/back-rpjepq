@@ -15,6 +15,11 @@ const dietasRoutes = require("./dietas.routes");
 const otrosDescuentosRoutes = require("./otrosDescuentos.routes");
 const nominaRoutes = require("./nomina.routes");
 const usuariosRoutes = require("./usuarios.routes");
+const generacionPlanillaRoutes = require("./generacionPlanilla.routes");
+const reportesNominaRoutes = require("./reportesNomina.routes");
+const auditoriaRoutes = require("./auditoria.routes");
+const backupRoutes = require("./backup.routes");
+const systemRoutes = require("./system.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = Router();
@@ -42,5 +47,10 @@ router.use("/tiempo-extra", tiempoExtraRoutes);
 router.use("/dietas", dietasRoutes);
 router.use("/otros-descuentos", otrosDescuentosRoutes);
 router.use("/nomina", nominaRoutes);
+router.use("/generacion-planilla", generacionPlanillaRoutes);
+router.use("/reportes/nomina", reportesNominaRoutes);
+router.use("/auditoria", auditoriaRoutes);
+router.use("/backup", backupRoutes);
+router.use("/system", systemRoutes);
 
 module.exports = router;

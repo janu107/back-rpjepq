@@ -1,0 +1,3 @@
+SELECT DISTINCT aud_modulo
+FROM RPJ_SEG_AUDITORIA
+ORDER BY aud_modulo;

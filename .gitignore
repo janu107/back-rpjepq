@@ -7,3 +7,6 @@ pnpm-debug.log*
 dist/
 coverage/
 logs/*.log
+backups/*.sql
+backups/*.gz
+temp/restore/*

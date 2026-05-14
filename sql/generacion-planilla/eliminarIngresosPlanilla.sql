@@ -1,0 +1,2 @@
+DELETE FROM RPJ_PRC_NOMINA_INGRESO
+WHERE nin_id_planilla = ?;

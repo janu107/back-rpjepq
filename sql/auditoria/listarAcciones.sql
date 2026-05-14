@@ -1,0 +1,3 @@
+SELECT DISTINCT aud_accion
+FROM RPJ_SEG_AUDITORIA
+ORDER BY aud_accion;
