@@ -63,15 +63,39 @@ const listar = async (filters = {}) => {
   const page = Math.max(Number(filters.page || 1), 1);
   const limit = Math.min(Math.max(Number(filters.limit || 50), 1), 200);
   const offset = (page - 1) * limit;
-  const usuario = filters.usuario || null;
-  const modulo = filters.modulo || null;
-  const accion = filters.accion || null;
-  const fechaInicio = filters.fechaInicio || null;
-  const fechaFin = filters.fechaFin || null;
+  const params = [];
+  const where = [];
 
-  const params = [usuario, usuario, modulo, modulo, accion, accion, fechaInicio, fechaInicio, fechaFin, fechaFin];
-  const [rows] = await pool.execute(sql("listar"), [...params, limit, offset]);
-  const [countRows] = await pool.execute(sql("contar"), params);
+  if (filters.usuario) {
+    where.push("aud_usuario LIKE ?");
+    params.push(`%${String(filters.usuario).trim()}%`);
+  }
+
+  if (filters.modulo) {
+    where.push("aud_modulo = ?");
+    params.push(String(filters.modulo).trim().toUpperCase());
+  }
+
+  if (filters.accion) {
+    where.push("aud_accion = ?");
+    params.push(String(filters.accion).trim().toUpperCase());
+  }
+
+  if (filters.fechaInicio) {
+    where.push("DATE(aud_fecha) >= ?");
+    params.push(filters.fechaInicio);
+  }
+
+  if (filters.fechaFin) {
+    where.push("DATE(aud_fecha) <= ?");
+    params.push(filters.fechaFin);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const listSql = sql("listar").replace("/*WHERE_CLAUSE*/", whereSql);
+  const countSql = sql("contar").replace("/*WHERE_CLAUSE*/", whereSql);
+  const [rows] = await pool.query(listSql, [...params, limit, offset]);
+  const [countRows] = await pool.query(countSql, params);
   return { rows: rows.map(mapAudit), total: Number(countRows[0]?.total || 0), page, limit };
 };
 
