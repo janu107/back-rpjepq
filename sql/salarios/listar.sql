@@ -11,4 +11,4 @@ SELECT
 FROM RPJ_MNT_SALARIO s
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = s.sal_tipo_manejo
 LEFT JOIN RPJ_CAT_TIPO_INGRESO ti ON ti.tin_id = s.sal_tipo_ingreso
-ORDER BY s.sal_correlativo DESC;
+ORDER BY s.sal_correlativo ASC;

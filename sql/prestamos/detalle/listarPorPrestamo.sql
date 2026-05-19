@@ -12,4 +12,4 @@ SELECT
   dpr_usuario_creacion
 FROM RPJ_MNT_DETALLE_PRESTAMO
 WHERE dpr_id_prestamo = ?
-ORDER BY dpr_fecha_pago DESC, dpr_correlativo DESC;
+ORDER BY dpr_correlativo ASC;

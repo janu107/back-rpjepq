@@ -164,6 +164,16 @@ const validateDate = (value, message) => {
 const getConfig = (key) => configs[key];
 const getQuery = (config, file) => getSql(`${config.dir}/${file}.sql`);
 
+const applyDefaultManejo = async (key, payload) => {
+  if (!["empleados"].includes(key) || payload.tipoManejo) return payload;
+  const [rows] = await pool.execute(getSql("catalogos/manejo-administracion/buscarEmpleadoRegimen.sql"));
+  if (!rows[0]) {
+    logger.warn("No existe manejo EMPLEADO REGIMEN");
+    return payload;
+  }
+  return { ...payload, tipoManejo: rows[0].man_id };
+};
+
 const validatePayload = (config, data) => {
   config.required.forEach((field) => {
     if (data[field] === undefined || data[field] === null || String(data[field]).trim() === "") {
@@ -204,20 +214,22 @@ const getById = async (key, id) => {
 
 const create = async (key, payload, currentUser) => {
   const config = getConfig(key);
-  validatePayload(config, payload);
-  await ensureUnique(config, payload[config.duplicateField]);
+  const data = await applyDefaultManejo(key, payload);
+  validatePayload(config, data);
+  await ensureUnique(config, data[config.duplicateField]);
   const createdBy = currentUser?.usuario || "sistema";
-  const [result] = await pool.execute(getQuery(config, "crear"), [...config.toDb(payload), createdBy]);
+  const [result] = await pool.execute(getQuery(config, "crear"), [...config.toDb(data), createdBy]);
   logger.info("Registro de mantenimiento creado", { modulo: key, id: result.insertId, createdBy });
   return getById(key, result.insertId);
 };
 
 const update = async (key, id, payload, currentUser) => {
   const config = getConfig(key);
-  validatePayload(config, payload);
+  const data = await applyDefaultManejo(key, payload);
+  validatePayload(config, data);
   await getById(key, id);
-  await ensureUnique(config, payload[config.duplicateField], id);
-  await pool.execute(getQuery(config, "actualizar"), [...config.toDb(payload), id]);
+  await ensureUnique(config, data[config.duplicateField], id);
+  await pool.execute(getQuery(config, "actualizar"), [...config.toDb(data), id]);
   logger.info("Registro de mantenimiento actualizado", { modulo: key, id, updatedBy: currentUser?.usuario });
   return getById(key, id);
 };

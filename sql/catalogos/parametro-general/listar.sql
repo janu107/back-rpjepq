@@ -12,4 +12,4 @@ SELECT
   par_fecha_creacion,
   par_usuario_creacion
 FROM RPJ_CAT_PARAMETRO_GENERAL
-ORDER BY par_id DESC;
+ORDER BY par_id ASC;

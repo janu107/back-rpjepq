@@ -18,4 +18,4 @@ SELECT
   m.man_descripcion AS manejo_descripcion
 FROM RPJ_MNT_APORTACION_EPQ a
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = a.apo_tipo_manejo
-ORDER BY a.apo_correlativo DESC;
+ORDER BY a.apo_correlativo ASC;

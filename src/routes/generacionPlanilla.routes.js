@@ -17,8 +17,8 @@ const authorizeGenerate = (req, res, next) => {
 router.post("/preview", authorizeRoles("ADMIN", "OPERADOR"), controller.preview);
 router.post("/generar", authorizeRoles("ADMIN", "OPERADOR"), authorizeGenerate, auditAction("GENERACION_PLANILLA", "GENERAR", (req) => req.body?.regenerar ? "Regeneracion de planilla" : "Generacion de planilla"), controller.generar);
 router.post("/regenerar", authorizeRoles("ADMIN"), auditAction("GENERACION_PLANILLA", "REGENERAR", "Regeneracion de planilla"), controller.generar);
-router.get("/validar/:idPlanilla", authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"), controller.validar);
-router.get("/resumen/:idPlanilla", authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"), controller.resumen);
+router.get("/validar/:idPlanilla", authorizeRoles("ADMIN", "OPERADOR"), controller.validar);
+router.get("/resumen/:idPlanilla", authorizeRoles("ADMIN", "OPERADOR"), controller.resumen);
 router.delete("/limpiar/:idPlanilla", authorizeRoles("ADMIN"), auditAction("GENERACION_PLANILLA", "LIMPIAR", (req) => `Limpieza planilla ${req.params.idPlanilla}`), controller.limpiar);
 
 module.exports = router;

@@ -21,4 +21,4 @@ FROM RPJ_MNT_EMPLEADO e
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = e.emp_tipo_manejo
 LEFT JOIN RPJ_CAT_PUESTO p ON p.pue_id = e.emp_id_puesto
 LEFT JOIN RPJ_CAT_AREA a ON a.are_id = p.pue_id_area
-ORDER BY e.emp_correlativo DESC;
+ORDER BY e.emp_correlativo ASC;

@@ -17,4 +17,4 @@ SELECT
   a.apo_dpi
 FROM RPJ_MNT_PRESTAMO p
 INNER JOIN RPJ_MNT_APORTACION_EPQ a ON a.apo_correlativo = p.pre_id_aportacion
-ORDER BY p.pre_correlativo DESC;
+ORDER BY p.pre_correlativo ASC;

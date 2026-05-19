@@ -13,4 +13,4 @@ SELECT
   t.tpl_descripcion AS tipo_planilla_descripcion
 FROM RPJ_CAT_PARAMETRO_PLANILLA p
 LEFT JOIN RPJ_CAT_TIPO_PLANILLA t ON t.tpl_id = p.ppl_tipo_planilla
-ORDER BY p.ppl_correlativo DESC;
+ORDER BY p.ppl_correlativo ASC;

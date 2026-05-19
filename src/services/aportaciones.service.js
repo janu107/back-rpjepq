@@ -77,6 +77,16 @@ const toDb = (data) => [
   data.ubicacion
 ];
 
+const applyDefaultManejo = async (payload) => {
+  if (payload.tipoManejo) return payload;
+  const [rows] = await pool.execute(getSql("catalogos/manejo-administracion/buscarEmpleadoRegimen.sql"));
+  if (!rows[0]) {
+    logger.warn("No existe manejo EMPLEADO REGIMEN");
+    return payload;
+  }
+  return { ...payload, tipoManejo: rows[0].man_id };
+};
+
 const list = async () => {
   logger.info("Listado de aportaciones solicitado");
   const [rows] = await pool.execute(getSql("aportaciones/listar.sql"));
@@ -90,19 +100,21 @@ const getById = async (id) => {
 };
 
 const create = async (payload, currentUser) => {
-  validatePayload(payload);
-  await ensureUniqueDpi(payload.dpi);
+  const data = await applyDefaultManejo(payload);
+  validatePayload(data);
+  await ensureUniqueDpi(data.dpi);
   const createdBy = currentUser?.usuario || "sistema";
-  const [result] = await pool.execute(getSql("aportaciones/crear.sql"), [...toDb(payload), createdBy]);
-  logger.info("Aportacion creada", { id: result.insertId, dpi: payload.dpi, createdBy });
+  const [result] = await pool.execute(getSql("aportaciones/crear.sql"), [...toDb(data), createdBy]);
+  logger.info("Aportacion creada", { id: result.insertId, dpi: data.dpi, createdBy });
   return getById(result.insertId);
 };
 
 const update = async (id, payload, currentUser) => {
-  validatePayload(payload);
+  const data = await applyDefaultManejo(payload);
+  validatePayload(data);
   await getById(id);
-  await ensureUniqueDpi(payload.dpi, id);
-  await pool.execute(getSql("aportaciones/actualizar.sql"), [...toDb(payload), id]);
+  await ensureUniqueDpi(data.dpi, id);
+  await pool.execute(getSql("aportaciones/actualizar.sql"), [...toDb(data), id]);
   logger.info("Aportacion actualizada", { id, updatedBy: currentUser?.usuario });
   return getById(id);
 };

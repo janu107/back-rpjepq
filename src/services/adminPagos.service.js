@@ -119,6 +119,16 @@ const calculateHours = (start, end) => Number(((new Date(end) - new Date(start))
 
 const getQuery = (config, file) => getSql(`${config.dir}/${file}.sql`);
 
+const applyDefaultManejo = async (key, payload) => {
+  if (!["salarios"].includes(key) || payload.tipoManejo) return payload;
+  const [rows] = await pool.execute(getSql("catalogos/manejo-administracion/buscarEmpleadoRegimen.sql"));
+  if (!rows[0]) {
+    logger.warn("No existe manejo EMPLEADO REGIMEN");
+    return payload;
+  }
+  return { ...payload, tipoManejo: rows[0].man_id };
+};
+
 const validatePayload = (config, payload) => {
   config.required.forEach((field) => {
     if (payload[field] === undefined || payload[field] === null || String(payload[field]).trim() === "") {
@@ -144,7 +154,8 @@ const getById = async (key, id) => {
 
 const create = async (key, payload, currentUser) => {
   const config = configs[key];
-  const data = config.normalize ? config.normalize(payload) : payload;
+  const withDefault = await applyDefaultManejo(key, payload);
+  const data = config.normalize ? config.normalize(withDefault) : withDefault;
   validatePayload(config, data);
   const createdBy = currentUser?.usuario || "sistema";
   const [result] = await pool.execute(getQuery(config, "crear"), [...config.toDb(data), createdBy]);
@@ -152,9 +163,41 @@ const create = async (key, payload, currentUser) => {
   return getById(key, result.insertId);
 };
 
+const bulkCreate = async (key, items = [], currentUser) => {
+  const config = configs[key];
+  if (!Array.isArray(items) || items.length === 0) {
+    throw createError("Debe enviar al menos un registro");
+  }
+
+  const withDefaults = await Promise.all(items.map((payload) => applyDefaultManejo(key, payload)));
+  const normalizedItems = withDefaults.map((payload) => (config.normalize ? config.normalize(payload) : payload));
+  normalizedItems.forEach((item) => validatePayload(config, item));
+
+  const createdBy = currentUser?.usuario || "sistema";
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const ids = [];
+    for (const item of normalizedItems) {
+      const [result] = await connection.execute(getQuery(config, "crear"), [...config.toDb(item), createdBy]);
+      ids.push(result.insertId);
+    }
+    await connection.commit();
+    logger.info("Registros admin pagos creados en lote", { modulo: key, total: ids.length, createdBy });
+    return { total: ids.length, ids };
+  } catch (error) {
+    await connection.rollback();
+    logger.error("Error al crear registros en lote", { modulo: key, message: error.message, code: error.code });
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
 const update = async (key, id, payload, currentUser) => {
   const config = configs[key];
-  const data = config.normalize ? config.normalize(payload) : payload;
+  const withDefault = await applyDefaultManejo(key, payload);
+  const data = config.normalize ? config.normalize(withDefault) : withDefault;
   validatePayload(config, data);
   await getById(key, id);
   await pool.execute(getQuery(config, "actualizar"), [...config.toDb(data), id]);
@@ -175,4 +218,4 @@ const remove = async (key, id, currentUser) => {
   }
 };
 
-module.exports = { list, getById, create, update, remove };
+module.exports = { list, getById, create, bulkCreate, update, remove };

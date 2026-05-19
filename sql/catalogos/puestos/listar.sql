@@ -11,4 +11,4 @@ SELECT
 FROM RPJ_CAT_PUESTO p
 LEFT JOIN RPJ_CAT_AREA a ON a.are_id = p.pue_id_area
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = p.pue_tipo_manejo
-ORDER BY p.pue_id DESC;
+ORDER BY p.pue_id ASC;

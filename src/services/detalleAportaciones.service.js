@@ -21,6 +21,8 @@ const validatePayload = (data) => {
 const mapDetalle = (row) => ({
   id: row.dap_correlativo,
   idAportacion: row.dap_id_aportacion,
+  codigoEmpleado: row.apo_id,
+  nombre: `${row.apo_nombre || ""} ${row.apo_apellido || ""}`.trim(),
   fechaPago: row.dap_fecha_pago,
   valor: Number(row.dap_valor),
   fechaCreacion: row.dap_fecha_creacion,

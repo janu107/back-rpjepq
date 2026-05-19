@@ -1,0 +1,6 @@
+SELECT
+  man_id,
+  man_descripcion
+FROM RPJ_CAT_MANEJO_ADMINISTRACION
+WHERE UPPER(REPLACE(man_descripcion, 'É', 'E')) = 'EMPLEADO REGIMEN'
+LIMIT 1;

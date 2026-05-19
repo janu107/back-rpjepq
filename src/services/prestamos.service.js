@@ -72,7 +72,10 @@ const getById = async (id) => {
 
 const create = async (payload, currentUser) => {
   validatePayload(payload);
-  await aportacionesService.getById(payload.idAportacion);
+  const aportacion = await aportacionesService.getById(payload.idAportacion);
+  if (aportacion.tienePrestamo && ["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
+    throw createError("El aportante ya tiene un prestamo activo", 409);
+  }
   await ensureUniqueContract(payload.noContrato);
   const createdBy = currentUser?.usuario || "sistema";
   const connection = await pool.getConnection();
@@ -94,8 +97,11 @@ const create = async (payload, currentUser) => {
 
 const update = async (id, payload, currentUser) => {
   validatePayload(payload);
-  await getById(id);
-  await aportacionesService.getById(payload.idAportacion);
+  const current = await getById(id);
+  const aportacion = await aportacionesService.getById(payload.idAportacion);
+  if (Number(current.idAportacion) !== Number(payload.idAportacion) && aportacion.tienePrestamo && ["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
+    throw createError("El aportante ya tiene un prestamo activo", 409);
+  }
   await ensureUniqueContract(payload.noContrato, id);
   await pool.execute(getSql("prestamos/actualizar.sql"), [...toDb(payload), id]);
   await pool.execute(getSql("prestamos/actualizarTienePrestamoAportacion.sql"), [1, payload.idAportacion]);
