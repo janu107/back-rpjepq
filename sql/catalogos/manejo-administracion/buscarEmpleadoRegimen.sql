@@ -2,5 +2,6 @@ SELECT
   man_id,
   man_descripcion
 FROM RPJ_CAT_MANEJO_ADMINISTRACION
-WHERE UPPER(REPLACE(man_descripcion, 'É', 'E')) = 'EMPLEADO REGIMEN'
+WHERE UPPER(man_descripcion) = 'EMPLEADO REGIMEN'
+   OR UPPER(man_descripcion) LIKE 'EMPLEADO R_GIMEN'
 LIMIT 1;
