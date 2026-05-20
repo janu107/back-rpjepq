@@ -23,6 +23,7 @@ const mapPrestamo = (row) => ({
   totalPagar: Number(row.pre_total_pagar),
   tasaInteres: Number(row.pre_tasa_interes),
   estado: row.pre_estado,
+  tipoManejo: row.apo_tipo_manejo,
   aportacionNombre: `${row.apo_nombre || ""} ${row.apo_apellido || ""}`.trim(),
   aportacionDpi: row.apo_dpi,
   fechaCreacion: row.pre_fecha_creacion,
