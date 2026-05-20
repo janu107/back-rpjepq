@@ -17,6 +17,8 @@ const validateDate = (value, label) => {
 };
 
 const normalizeBool = (value) => (value === true || value === 1 || value === "1" ? 1 : 0);
+const isFechaFinNullSchemaError = (error) =>
+  error?.code === "ER_BAD_NULL_ERROR" && String(error?.message || "").includes("apo_fecha_fin_aportacion");
 
 const mapAportacion = (row) => ({
   id: row.apo_correlativo,
@@ -104,9 +106,16 @@ const create = async (payload, currentUser) => {
   validatePayload(data);
   await ensureUniqueDpi(data.dpi);
   const createdBy = currentUser?.usuario || "sistema";
-  const [result] = await pool.execute(getSql("aportaciones/crear.sql"), [...toDb(data), createdBy]);
-  logger.info("Aportacion creada", { id: result.insertId, dpi: data.dpi, createdBy });
-  return getById(result.insertId);
+  try {
+    const [result] = await pool.execute(getSql("aportaciones/crear.sql"), [...toDb(data), createdBy]);
+    logger.info("Aportacion creada", { id: result.insertId, dpi: data.dpi, createdBy });
+    return getById(result.insertId);
+  } catch (error) {
+    if (isFechaFinNullSchemaError(error)) {
+      throw createError("La fecha fin de aportacion puede quedar vacia, pero la columna apo_fecha_fin_aportacion aun no permite NULL. Ejecute sql/aportaciones/permitirFechaFinNull.sql.", 500);
+    }
+    throw error;
+  }
 };
 
 const update = async (id, payload, currentUser) => {
@@ -114,9 +123,16 @@ const update = async (id, payload, currentUser) => {
   validatePayload(data);
   await getById(id);
   await ensureUniqueDpi(data.dpi, id);
-  await pool.execute(getSql("aportaciones/actualizar.sql"), [...toDb(data), id]);
-  logger.info("Aportacion actualizada", { id, updatedBy: currentUser?.usuario });
-  return getById(id);
+  try {
+    await pool.execute(getSql("aportaciones/actualizar.sql"), [...toDb(data), id]);
+    logger.info("Aportacion actualizada", { id, updatedBy: currentUser?.usuario });
+    return getById(id);
+  } catch (error) {
+    if (isFechaFinNullSchemaError(error)) {
+      throw createError("La fecha fin de aportacion puede quedar vacia, pero la columna apo_fecha_fin_aportacion aun no permite NULL. Ejecute sql/aportaciones/permitirFechaFinNull.sql.", 500);
+    }
+    throw error;
+  }
 };
 
 const changeStatus = async (id, estado, currentUser) => {
