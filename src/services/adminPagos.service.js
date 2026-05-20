@@ -138,6 +138,29 @@ const validatePayload = (config, payload) => {
   config.validate(payload);
 };
 
+const assertUniqueSalaryTypesInPayload = (items) => {
+  const seen = new Set();
+  items.forEach((item) => {
+    const key = `${item.tipoManejo}-${item.tipoIngreso}`;
+    if (seen.has(key)) {
+      throw createError("El tipo de ingreso no se puede repetir para el mismo manejo", 409);
+    }
+    seen.add(key);
+  });
+};
+
+const ensureUniqueSalaryType = async (data, excludeId = null, executor = pool) => {
+  const [rows] = await executor.execute(getSql("salarios/buscarDuplicado.sql"), [
+    data.tipoManejo,
+    data.tipoIngreso,
+    excludeId,
+    excludeId
+  ]);
+  if (rows.length > 0) {
+    throw createError("El tipo de ingreso ya existe para este manejo", 409);
+  }
+};
+
 const list = async (key) => {
   const config = configs[key];
   logger.info("Listado modulo admin pagos", { modulo: key });
@@ -157,6 +180,9 @@ const create = async (key, payload, currentUser) => {
   const withDefault = await applyDefaultManejo(key, payload);
   const data = config.normalize ? config.normalize(withDefault) : withDefault;
   validatePayload(config, data);
+  if (key === "salarios") {
+    await ensureUniqueSalaryType(data);
+  }
   const createdBy = currentUser?.usuario || "sistema";
   const [result] = await pool.execute(getQuery(config, "crear"), [...config.toDb(data), createdBy]);
   logger.info("Registro admin pagos creado", { modulo: key, id: result.insertId, createdBy });
@@ -172,6 +198,9 @@ const bulkCreate = async (key, items = [], currentUser) => {
   const withDefaults = await Promise.all(items.map((payload) => applyDefaultManejo(key, payload)));
   const normalizedItems = withDefaults.map((payload) => (config.normalize ? config.normalize(payload) : payload));
   normalizedItems.forEach((item) => validatePayload(config, item));
+  if (key === "salarios") {
+    assertUniqueSalaryTypesInPayload(normalizedItems);
+  }
 
   const createdBy = currentUser?.usuario || "sistema";
   const connection = await pool.getConnection();
@@ -179,6 +208,9 @@ const bulkCreate = async (key, items = [], currentUser) => {
     await connection.beginTransaction();
     const ids = [];
     for (const item of normalizedItems) {
+      if (key === "salarios") {
+        await ensureUniqueSalaryType(item, null, connection);
+      }
       const [result] = await connection.execute(getQuery(config, "crear"), [...config.toDb(item), createdBy]);
       ids.push(result.insertId);
     }
@@ -200,6 +232,9 @@ const update = async (key, id, payload, currentUser) => {
   const data = config.normalize ? config.normalize(withDefault) : withDefault;
   validatePayload(config, data);
   await getById(key, id);
+  if (key === "salarios") {
+    await ensureUniqueSalaryType(data, id);
+  }
   await pool.execute(getQuery(config, "actualizar"), [...config.toDb(data), id]);
   logger.info("Registro admin pagos actualizado", { modulo: key, id, updatedBy: currentUser?.usuario });
   return getById(key, id);
