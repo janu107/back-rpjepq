@@ -5,7 +5,7 @@ const getSql = require("../utils/sqlLoader");
 const ESTADOS = ["ACTIVO", "INACTIVO"];
 const ESTADOS_CIVILES = ["SOLTERO", "CASADO", "UNIDO", "DIVORCIADO", "VIUDO"];
 const TIPOS_PUESTO = ["ADMINISTRATIVO", "OPERATIVO", "TECNICO", "OTRO"];
-const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO"];
+const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO", "JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
 
 const configs = {
   empleados: {
