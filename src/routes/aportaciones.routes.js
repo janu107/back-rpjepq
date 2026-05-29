@@ -1,4 +1,5 @@
 const { Router } = require("express");
+const multer = require("multer");
 
 const aportacionesController = require("../controllers/aportaciones.controller");
 const detalleController = require("../controllers/detalleAportaciones.controller");
@@ -9,12 +10,21 @@ const { authorizeRoles } = require("../middlewares/role.middleware");
 const router = Router();
 router.use(authMiddleware);
 
+// Carga masiva por Excel: se recibe en memoria (Version IV). Limite 5MB.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
 router.get("/", authorizeRoles("ADMIN", "OPERADOR"), aportacionesController.list);
 router.get("/:id", authorizeRoles("ADMIN", "OPERADOR"), aportacionesController.getById);
 router.post("/", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "CREAR", "Creacion de aportacion"), aportacionesController.create);
 router.put("/:id", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "EDITAR", (req) => `Edicion aportacion ${req.params.id}`), aportacionesController.update);
 router.delete("/:id", authorizeRoles("ADMIN"), auditAction("APORTACIONES", "ELIMINAR", (req) => `Eliminacion aportacion ${req.params.id}`), aportacionesController.remove);
 router.patch("/:id/estado", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "CAMBIO_ESTADO", (req) => `Cambio estado aportacion ${req.params.id}`), aportacionesController.changeStatus);
+
+// Version IV: carga masiva de aportaciones desde Excel (solo agrega registros nuevos)
+router.post("/carga-masiva", authorizeRoles("ADMIN", "OPERADOR"), upload.single("archivo"), auditAction("APORTACIONES", "CARGA_MASIVA", "Carga masiva de aportaciones"), detalleController.bulkUpload);
 
 router.get("/:id/detalle", authorizeRoles("ADMIN", "OPERADOR"), detalleController.listByAportacion);
 router.post("/:id/detalle", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "CREAR_DETALLE"), detalleController.createDetalle);

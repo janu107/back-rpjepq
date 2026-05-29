@@ -1,0 +1,2 @@
+DELETE FROM RPJ_CAT_FIRMA_PLANILLA
+WHERE fpl_correlativo = ?;

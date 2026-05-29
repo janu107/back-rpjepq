@@ -1,6 +1,7 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const { upperCaseFields } = require("../utils/text");
 
 const TIPOS_HORA = ["DIURNA", "NOCTURNA", "MIXTA", "FERIADO"];
 
@@ -25,6 +26,7 @@ const configs = {
   "tiempo-extra": {
     dir: "tiempo-extra",
     required: ["idEmpleado", "fechaHoraInicio", "fechaHoraFinal", "motivo", "tipoHora"],
+    upperFields: ["motivo", "tipoHora"],
     validate: (data) => {
       validateDate(data.fechaHoraInicio, "Fecha/hora inicio");
       validateDate(data.fechaHoraFinal, "Fecha/hora final");
@@ -34,7 +36,9 @@ const configs = {
     normalize: (data) => ({
       ...data,
       tipoHora: String(data.tipoHora).toUpperCase(),
-      cantidadHoras: data.cantidadHoras || calculateHours(data.fechaHoraInicio, data.fechaHoraFinal)
+      // Version IV: el backend SIEMPRE recalcula las horas a partir de las fechas
+      // para evitar manipulacion desde el frontend.
+      cantidadHoras: calculateHours(data.fechaHoraInicio, data.fechaHoraFinal)
     }),
     toDb: (data) => [data.idEmpleado, data.fechaHoraInicio, data.fechaHoraFinal, data.cantidadHoras, data.motivo, data.tipoHora],
     toResponse: (row) => ({
@@ -54,6 +58,13 @@ const configs = {
   dietas: {
     dir: "dietas",
     required: ["idJuntaDirectiva", "fechaSesion", "fechaPago", "sesionesMes", "acta", "valor", "retencionIsr", "liquido", "total"],
+    upperFields: ["acta"],
+    // Version IV: el backend calcula valor/retencion/liquido/total desde los parametros
+    // generales. El usuario solo envia miembro, fechas, sesiones y acta.
+    prepare: async (data) => {
+      const { pagoDieta, isr } = await getParametrosDieta();
+      return { ...data, ...computeDieta(pagoDieta, isr, data.sesionesMes) };
+    },
     validate: (data) => {
       validateDate(data.fechaSesion, "Fecha sesion");
       validateDate(data.fechaPago, "Fecha pago");
@@ -80,6 +91,7 @@ const configs = {
   "otros-descuentos": {
     dir: "otros-descuentos",
     required: ["tipoManejo", "tipoDescuento", "valor", "motivo", "fecha"],
+    upperFields: ["motivo"],
     validate: (data) => {
       validateAmount(data.valor, "Valor");
       validateDate(data.fecha, "Fecha");
@@ -115,7 +127,32 @@ const validateDate = (value, label) => {
   if (!value || Number.isNaN(Date.parse(value))) throw createError(`${label} invalida`);
 };
 
-const calculateHours = (start, end) => Number(((new Date(end) - new Date(start)) / 3600000).toFixed(2));
+// Version IV: la columna tex_cantidad_horas es INT, por lo que se redondea hacia
+// arriba cualquier fraccion de hora. Devuelve 0 cuando el rango no es valido
+// (lo captura luego validateDate / la regla "final > inicio").
+const calculateHours = (start, end) => {
+  const diffMs = new Date(end) - new Date(start);
+  if (!(diffMs > 0)) return 0;
+  return Math.ceil(diffMs / 3600000);
+};
+
+// Version IV (Pago de dietas): los montos se calculan desde RPJ_CAT_PARAMETRO_GENERAL.
+const getParametrosDieta = async () => {
+  const [rows] = await pool.execute(getSql("dietas/parametrosDieta.sql"));
+  if (!rows[0]) {
+    throw createError("No hay parametros generales configurados.", 400);
+  }
+  return { pagoDieta: Number(rows[0].par_pago_dieta || 0), isr: Number(rows[0].par_isr || 0) };
+};
+
+const computeDieta = (pagoDieta, isr, sesionesMes) => {
+  const sesiones = Number(sesionesMes) > 0 ? Number(sesionesMes) : 1;
+  const valor = Number((pagoDieta * sesiones).toFixed(2));
+  const retencionIsr = Number((valor * isr / 100).toFixed(2));
+  const liquido = Number((valor - retencionIsr).toFixed(2));
+  // die_total es NOT NULL en la BD pero ya no se muestra al usuario: se guarda = liquido.
+  return { valor, retencionIsr, liquido, total: liquido };
+};
 
 const getQuery = (config, file) => getSql(`${config.dir}/${file}.sql`);
 
@@ -149,6 +186,16 @@ const assertUniqueSalaryTypesInPayload = (items) => {
   });
 };
 
+const salaryTypeExists = async (data, executor = pool) => {
+  const [rows] = await executor.execute(getSql("salarios/buscarDuplicado.sql"), [
+    data.tipoManejo,
+    data.tipoIngreso,
+    null,
+    null
+  ]);
+  return rows.length > 0;
+};
+
 const ensureUniqueSalaryType = async (data, excludeId = null, executor = pool) => {
   const [rows] = await executor.execute(getSql("salarios/buscarDuplicado.sql"), [
     data.tipoManejo,
@@ -160,6 +207,9 @@ const ensureUniqueSalaryType = async (data, excludeId = null, executor = pool) =
     throw createError("El tipo de ingreso ya existe para este manejo", 409);
   }
 };
+
+// Convierte a MAYUSCULAS los campos de texto configurados (Version IV).
+const applyUpper = (config, data) => (config.upperFields ? upperCaseFields(data, config.upperFields) : data);
 
 const list = async (key) => {
   const config = configs[key];
@@ -178,7 +228,8 @@ const getById = async (key, id) => {
 const create = async (key, payload, currentUser) => {
   const config = configs[key];
   const withDefault = await applyDefaultManejo(key, payload);
-  const data = config.normalize ? config.normalize(withDefault) : withDefault;
+  const prepared = config.prepare ? await config.prepare(withDefault) : withDefault;
+  const data = applyUpper(config, config.normalize ? config.normalize(prepared) : prepared);
   validatePayload(config, data);
   if (key === "salarios") {
     await ensureUniqueSalaryType(data);
@@ -196,7 +247,8 @@ const bulkCreate = async (key, items = [], currentUser) => {
   }
 
   const withDefaults = await Promise.all(items.map((payload) => applyDefaultManejo(key, payload)));
-  const normalizedItems = withDefaults.map((payload) => (config.normalize ? config.normalize(payload) : payload));
+  const preparedItems = config.prepare ? await Promise.all(withDefaults.map((payload) => config.prepare(payload))) : withDefaults;
+  const normalizedItems = preparedItems.map((payload) => applyUpper(config, config.normalize ? config.normalize(payload) : payload));
   normalizedItems.forEach((item) => validatePayload(config, item));
   if (key === "salarios") {
     assertUniqueSalaryTypesInPayload(normalizedItems);
@@ -207,16 +259,34 @@ const bulkCreate = async (key, items = [], currentUser) => {
   try {
     await connection.beginTransaction();
     const ids = [];
+    let skipped = 0;
     for (const item of normalizedItems) {
       if (key === "salarios") {
-        await ensureUniqueSalaryType(item, null, connection);
+        // Version IV: el salario es por manejo de administracion. Si la combinacion
+        // (manejo, tipoIngreso) ya existe NO es un error: se omite para no bloquear
+        // el alta de empleados/jubilados que comparten el mismo manejo.
+        const exists = await salaryTypeExists(item, connection);
+        if (exists) {
+          skipped += 1;
+          continue;
+        }
       }
-      const [result] = await connection.execute(getQuery(config, "crear"), [...config.toDb(item), createdBy]);
-      ids.push(result.insertId);
+      try {
+        const [result] = await connection.execute(getQuery(config, "crear"), [...config.toDb(item), createdBy]);
+        ids.push(result.insertId);
+      } catch (error) {
+        // Salvaguarda: un duplicado de salario (por indice UNIQUE o concurrencia) se omite
+        // en lugar de abortar todo el alta del empleado/jubilado.
+        if (key === "salarios" && (error.code === "ER_DUP_ENTRY" || error.status === 409)) {
+          skipped += 1;
+          continue;
+        }
+        throw error;
+      }
     }
     await connection.commit();
-    logger.info("Registros admin pagos creados en lote", { modulo: key, total: ids.length, createdBy });
-    return { total: ids.length, ids };
+    logger.info("Registros admin pagos creados en lote", { modulo: key, total: ids.length, skipped, createdBy });
+    return { total: ids.length, ids, skipped };
   } catch (error) {
     await connection.rollback();
     logger.error("Error al crear registros en lote", { modulo: key, message: error.message, code: error.code });
@@ -229,7 +299,8 @@ const bulkCreate = async (key, items = [], currentUser) => {
 const update = async (key, id, payload, currentUser) => {
   const config = configs[key];
   const withDefault = await applyDefaultManejo(key, payload);
-  const data = config.normalize ? config.normalize(withDefault) : withDefault;
+  const prepared = config.prepare ? await config.prepare(withDefault) : withDefault;
+  const data = applyUpper(config, config.normalize ? config.normalize(prepared) : prepared);
   validatePayload(config, data);
   await getById(key, id);
   if (key === "salarios") {

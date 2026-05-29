@@ -1,8 +1,11 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const { upperCaseFields } = require("../utils/text");
 
 const ESTADOS = ["ACTIVO", "INACTIVO", "RETIRADO"];
+// Campos de texto de la aportacion que se guardan en MAYUSCULAS (Version IV).
+const UPPER_FIELDS = ["nombre", "apellido", "gerencia", "ubicacion", "motivoRetiro"];
 
 const createError = (message, status = 400) => {
   const error = new Error(message);
@@ -63,6 +66,14 @@ const ensureUniqueDpi = async (dpi, excludeId = null) => {
   }
 };
 
+// Valida que el ID visible de aportacion (apo_id) no este duplicado (Version IV).
+const ensureUniqueApoId = async (idAportacion, excludeId = null) => {
+  const [rows] = await pool.execute(getSql("aportaciones/buscarPorIdAportacion.sql"), [idAportacion]);
+  if (rows.some((row) => Number(row.apo_correlativo) !== Number(excludeId))) {
+    throw createError("EL ID DE APORTACION YA EXISTE. INGRESE UN ID DIFERENTE.", 409);
+  }
+};
+
 const toDb = (data) => [
   data.tipoManejo,
   data.idAportacion,
@@ -102,9 +113,10 @@ const getById = async (id) => {
 };
 
 const create = async (payload, currentUser) => {
-  const data = await applyDefaultManejo(payload);
+  const data = upperCaseFields(await applyDefaultManejo(payload), UPPER_FIELDS);
   validatePayload(data);
   await ensureUniqueDpi(data.dpi);
+  await ensureUniqueApoId(data.idAportacion);
   const createdBy = currentUser?.usuario || "sistema";
   try {
     const [result] = await pool.execute(getSql("aportaciones/crear.sql"), [...toDb(data), createdBy]);
@@ -119,10 +131,11 @@ const create = async (payload, currentUser) => {
 };
 
 const update = async (id, payload, currentUser) => {
-  const data = await applyDefaultManejo(payload);
+  const data = upperCaseFields(await applyDefaultManejo(payload), UPPER_FIELDS);
   validatePayload(data);
   await getById(id);
   await ensureUniqueDpi(data.dpi, id);
+  await ensureUniqueApoId(data.idAportacion, id);
   try {
     await pool.execute(getSql("aportaciones/actualizar.sql"), [...toDb(data), id]);
     logger.info("Aportacion actualizada", { id, updatedBy: currentUser?.usuario });

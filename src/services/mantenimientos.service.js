@@ -1,10 +1,12 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const { upperCaseFields } = require("../utils/text");
 
 const ESTADOS = ["ACTIVO", "INACTIVO"];
 const ESTADOS_CIVILES = ["SOLTERO", "CASADO", "UNIDO", "DIVORCIADO", "VIUDO"];
-const TIPOS_PUESTO = ["ADMINISTRATIVO", "OPERATIVO", "TECNICO", "OTRO"];
+// Version IV: el tipo de puesto del empleado debe limitarse a FIJO / CONTRATO / TEMPORAL.
+const TIPOS_PUESTO = ["FIJO", "CONTRATO", "TEMPORAL"];
 const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO", "JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
 
 const configs = {
@@ -14,6 +16,12 @@ const configs = {
     required: ["tipoManejo", "idEmpleado", "nombres", "apellidos", "direccion", "dpi", "estadoCivil", "fechaNacimiento", "tipoPuesto", "idPuesto"],
     duplicateField: "dpi",
     duplicateColumn: "emp_correlativo",
+    // Validacion de ID visible unico (Version IV)
+    idField: "idEmpleado",
+    idColumn: "emp_correlativo",
+    idMessage: "EL ID DE EMPLEADO YA EXISTE. INGRESE UN ID DIFERENTE.",
+    // Campos de texto que deben guardarse en MAYUSCULAS
+    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "tipoPuesto"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
       validateOption(data.tipoPuesto, TIPOS_PUESTO, "Tipo puesto no permitido");
@@ -60,6 +68,10 @@ const configs = {
     required: ["tipoManejo", "idJubilado", "nombres", "apellidos", "fechaNacimiento", "dpi", "direccion", "estadoCivil", "estado", "fechaJubilacion", "tipoJubilacion"],
     duplicateField: "dpi",
     duplicateColumn: "jub_correlativo",
+    idField: "idJubilado",
+    idColumn: "jub_correlativo",
+    idMessage: "EL ID DE JUBILADO YA EXISTE. INGRESE UN ID DIFERENTE.",
+    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "estado"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
       validateOption(data.estado, ESTADOS, "Estado no permitido");
@@ -106,6 +118,10 @@ const configs = {
     required: ["tipoManejo", "idJunta", "nombre", "apellidos", "tipoJunta", "nit", "puesto", "estado", "fechaInicio", "fechaFinal"],
     duplicateField: "nit",
     duplicateColumn: "jun_correlativo",
+    idField: "idJunta",
+    idColumn: "jun_correlativo",
+    idMessage: "EL ID DE JUNTA DIRECTIVA YA EXISTE. INGRESE UN ID DIFERENTE.",
+    upperFields: ["nombre", "apellidos", "tipoJunta", "puesto", "estado"],
     validate: (data) => {
       validateOption(data.estado, ESTADOS, "Estado no permitido");
       validateOption(data.tipoJunta, TIPOS_JUNTA, "Tipo junta no permitido");
@@ -196,6 +212,19 @@ const ensureUnique = async (config, value, excludeId = null) => {
   }
 };
 
+// Valida que el ID visible (emp_id / jub_id / jun_id) no este duplicado (Version IV).
+// En edicion se excluye el propio correlativo para permitir conservar el mismo ID.
+const ensureUniqueId = async (config, idValue, excludeId = null) => {
+  if (!config.idField) return;
+  const [rows] = await pool.execute(getQuery(config, "buscarPorId"), [idValue]);
+  if (rows.some((row) => Number(row[config.idColumn]) !== Number(excludeId))) {
+    throw createError(config.idMessage || "El ID ya existe", 409);
+  }
+};
+
+// Convierte a MAYUSCULAS los campos de texto configurados para cada modulo.
+const normalizeData = (config, data) => (config.upperFields ? upperCaseFields(data, config.upperFields) : data);
+
 const list = async (key) => {
   const config = getConfig(key);
   logger.info("Listado de mantenimiento solicitado", { modulo: key });
@@ -214,9 +243,10 @@ const getById = async (key, id) => {
 
 const create = async (key, payload, currentUser) => {
   const config = getConfig(key);
-  const data = await applyDefaultManejo(key, payload);
+  const data = normalizeData(config, await applyDefaultManejo(key, payload));
   validatePayload(config, data);
   await ensureUnique(config, data[config.duplicateField]);
+  await ensureUniqueId(config, data[config.idField]);
   const createdBy = currentUser?.usuario || "sistema";
   const [result] = await pool.execute(getQuery(config, "crear"), [...config.toDb(data), createdBy]);
   logger.info("Registro de mantenimiento creado", { modulo: key, id: result.insertId, createdBy });
@@ -225,10 +255,11 @@ const create = async (key, payload, currentUser) => {
 
 const update = async (key, id, payload, currentUser) => {
   const config = getConfig(key);
-  const data = await applyDefaultManejo(key, payload);
+  const data = normalizeData(config, await applyDefaultManejo(key, payload));
   validatePayload(config, data);
   await getById(key, id);
   await ensureUnique(config, data[config.duplicateField], id);
+  await ensureUniqueId(config, data[config.idField], id);
   await pool.execute(getQuery(config, "actualizar"), [...config.toDb(data), id]);
   logger.info("Registro de mantenimiento actualizado", { modulo: key, id, updatedBy: currentUser?.usuario });
   return getById(key, id);

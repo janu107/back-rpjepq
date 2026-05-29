@@ -18,4 +18,6 @@ SELECT
   a.apo_dpi
 FROM RPJ_MNT_PRESTAMO p
 INNER JOIN RPJ_MNT_APORTACION_EPQ a ON a.apo_correlativo = p.pre_id_aportacion
+-- Version IV: mostrar unicamente aportaciones marcadas con prestamo (PRESTAMO = SI)
+WHERE a.apo_tiene_prestamo = 1
 ORDER BY p.pre_correlativo ASC;
