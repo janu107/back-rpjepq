@@ -1,0 +1,1 @@
+DELETE FROM RPJ_CAT_BANCOS WHERE ban_id = ?;

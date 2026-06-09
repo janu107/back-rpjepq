@@ -6,5 +6,6 @@ SET
   dpr_amortizacion = ?,
   dpr_intereses = ?,
   dpr_saldo = ?,
-  dpr_mora = ?
+  dpr_mora = ?,
+  dpr_seguro = ?
 WHERE dpr_correlativo = ?;

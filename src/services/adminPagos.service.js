@@ -50,6 +50,7 @@ const configs = {
       motivo: row.tex_motivo,
       tipoHora: row.tex_tipo_hora,
       empleadoNombre: `${row.emp_nombres || ""} ${row.emp_apellidos || ""}`.trim(),
+      empleadoCodigo: row.emp_id,
       empleadoDpi: row.emp_dpi,
       fechaCreacion: row.tex_fecha_creacion,
       usuarioCreacion: row.tex_usuario_creacion

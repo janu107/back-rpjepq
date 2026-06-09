@@ -5,6 +5,7 @@ SELECT
   j.jub_nombres,
   j.jub_apellidos,
   j.jub_fecha_nacimiento,
+  j.jub_sexo,
   j.jub_dpi,
   j.jub_direccion,
   j.jub_profesion_oficio,

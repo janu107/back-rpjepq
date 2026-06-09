@@ -8,6 +8,13 @@ const ESTADOS_PLANILLA = ["GRABADO", "GENERADO", "APROBADO"];
 const FRECUENCIAS_PLANILLA = ["MENSUAL", "QUINCENAL", "ANUAL", "TEMPORAL"];
 
 const catalogs = {
+  bancos: {
+    dir: "bancos",
+    required: ["nombre"],
+    upperFields: ["nombre"],
+    toDb: (data) => [data.nombre, data.estado || "ACTIVO"],
+    toResponse: (row) => ({ id: row.ban_id, nombre: row.ban_nombre, estado: row.ban_estado, fechaCreacion: row.ban_fecha_creacion, usuarioCreacion: row.ban_usuario_creacion })
+  },
   areas: {
     dir: "areas",
     required: ["descripcion"],
@@ -62,9 +69,9 @@ const catalogs = {
   },
   "tipo-planilla": {
     dir: "tipo-planilla",
-    required: ["tipoPlanilla", "descripcion", "idTipoUso"],
-    upperFields: ["tipoPlanilla", "descripcion"],
-    toDb: (data) => [data.tipoPlanilla, data.descripcion, data.idTipoUso],
+    required: ["descripcion", "idTipoUso"],
+    upperFields: ["descripcion"],
+    toDb: (data) => ["1", data.descripcion, data.idTipoUso],
     toResponse: (row) => ({ id: row.tpl_id, tipoPlanilla: row.tpl_tipo_planilla, descripcion: row.tpl_descripcion, idTipoUso: row.tpl_id_tipo_uso, tipoUsoDescripcion: row.tipo_uso_descripcion, fechaCreacion: row.tpl_fecha_creacion, usuarioCreacion: row.tpl_usuario_creacion })
   },
   "parametro-general": {

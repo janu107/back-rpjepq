@@ -10,6 +10,7 @@ SELECT
   e.emp_estado_civil,
   e.emp_profesion_oficio,
   e.emp_fecha_nacimiento,
+  e.emp_sexo,
   e.emp_tipo_puesto,
   e.emp_id_puesto,
   e.emp_fecha_creacion,

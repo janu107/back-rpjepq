@@ -7,6 +7,7 @@ INSERT INTO RPJ_MNT_DETALLE_PRESTAMO (
   dpr_intereses,
   dpr_saldo,
   dpr_mora,
+  dpr_seguro,
   dpr_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

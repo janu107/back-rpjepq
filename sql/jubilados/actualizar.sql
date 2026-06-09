@@ -5,6 +5,7 @@ SET
   jub_nombres = ?,
   jub_apellidos = ?,
   jub_fecha_nacimiento = ?,
+  jub_sexo = ?,
   jub_dpi = ?,
   jub_direccion = ?,
   jub_profesion_oficio = ?,

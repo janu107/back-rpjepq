@@ -15,18 +15,19 @@ const mapDetalle = (row) => ({
   intereses: Number(row.dpr_intereses),
   saldo: Number(row.dpr_saldo),
   mora: Number(row.dpr_mora),
+  seguro: Number(row.dpr_seguro || 0),
   fechaCreacion: row.dpr_fecha_creacion,
   usuarioCreacion: row.dpr_usuario_creacion
 });
 
 const validatePayload = (data) => {
   if (!data.fechaPago || Number.isNaN(Date.parse(data.fechaPago))) throw createError("Fecha de pago invalida");
-  ["descuentoNominaAportacion", "cuotaNivelada", "amortizacion", "intereses", "saldo", "mora"].forEach((field) => {
+  ["descuentoNominaAportacion", "cuotaNivelada", "amortizacion", "intereses", "saldo", "mora", "seguro"].forEach((field) => {
     if (data[field] === undefined || data[field] === null || Number(data[field]) < 0) throw createError(`El campo ${field} no puede ser negativo`);
   });
 };
 
-const toDb = (data) => [data.fechaPago, data.descuentoNominaAportacion, data.cuotaNivelada, data.amortizacion, data.intereses, data.saldo, data.mora];
+const toDb = (data) => [data.fechaPago, data.descuentoNominaAportacion, data.cuotaNivelada, data.amortizacion, data.intereses, data.saldo, data.mora, data.seguro || 0];
 
 const listByPrestamo = async (prestamoId) => {
   await prestamosService.getById(prestamoId);

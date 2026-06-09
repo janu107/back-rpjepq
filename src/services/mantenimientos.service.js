@@ -8,12 +8,13 @@ const ESTADOS_CIVILES = ["SOLTERO", "CASADO", "UNIDO", "DIVORCIADO", "VIUDO"];
 // Version IV: el tipo de puesto del empleado debe limitarse a FIJO / CONTRATO / TEMPORAL.
 const TIPOS_PUESTO = ["FIJO", "CONTRATO", "TEMPORAL"];
 const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO", "JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
+const SEXOS = ["MASCULINO", "FEMENINO"];
 
 const configs = {
   empleados: {
     dir: "empleados",
     idName: "empleado",
-    required: ["tipoManejo", "idEmpleado", "nombres", "apellidos", "direccion", "dpi", "estadoCivil", "fechaNacimiento", "tipoPuesto", "idPuesto"],
+    required: ["tipoManejo", "idEmpleado", "nombres", "apellidos", "direccion", "dpi", "estadoCivil", "fechaNacimiento", "sexo", "tipoPuesto", "idPuesto"],
     duplicateField: "dpi",
     duplicateColumn: "emp_correlativo",
     // Validacion de ID visible unico (Version IV)
@@ -21,9 +22,10 @@ const configs = {
     idColumn: "emp_correlativo",
     idMessage: "EL ID DE EMPLEADO YA EXISTE. INGRESE UN ID DIFERENTE.",
     // Campos de texto que deben guardarse en MAYUSCULAS
-    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "tipoPuesto"],
+    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "tipoPuesto"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
+      validateOption(data.sexo, SEXOS, "Sexo no permitido. Use: MASCULINO, FEMENINO");
       validateOption(data.tipoPuesto, TIPOS_PUESTO, "Tipo puesto no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
     },
@@ -38,6 +40,7 @@ const configs = {
       data.estadoCivil,
       data.profesionOficio || "",
       data.fechaNacimiento,
+      data.sexo,
       data.tipoPuesto,
       data.idPuesto
     ],
@@ -53,6 +56,7 @@ const configs = {
       estadoCivil: row.emp_estado_civil,
       profesionOficio: row.emp_profesion_oficio,
       fechaNacimiento: row.emp_fecha_nacimiento,
+      sexo: row.emp_sexo,
       tipoPuesto: row.emp_tipo_puesto,
       idPuesto: row.emp_id_puesto,
       manejoDescripcion: row.manejo_descripcion,
@@ -65,15 +69,16 @@ const configs = {
   jubilados: {
     dir: "jubilados",
     idName: "jubilado",
-    required: ["tipoManejo", "idJubilado", "nombres", "apellidos", "fechaNacimiento", "dpi", "direccion", "estadoCivil", "estado", "fechaJubilacion", "tipoJubilacion"],
+    required: ["tipoManejo", "idJubilado", "nombres", "apellidos", "fechaNacimiento", "sexo", "dpi", "direccion", "estadoCivil", "estado", "fechaJubilacion", "tipoJubilacion"],
     duplicateField: "dpi",
     duplicateColumn: "jub_correlativo",
     idField: "idJubilado",
     idColumn: "jub_correlativo",
     idMessage: "EL ID DE JUBILADO YA EXISTE. INGRESE UN ID DIFERENTE.",
-    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "estado"],
+    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "estado"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
+      validateOption(data.sexo, SEXOS, "Sexo no permitido. Use: MASCULINO, FEMENINO");
       validateOption(data.estado, ESTADOS, "Estado no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
       validateDate(data.fechaJubilacion, "Fecha de jubilacion invalida");
@@ -84,6 +89,7 @@ const configs = {
       data.nombres,
       data.apellidos,
       data.fechaNacimiento,
+      data.sexo,
       data.dpi,
       data.direccion,
       data.profesionOficio || "",
@@ -99,6 +105,7 @@ const configs = {
       nombres: row.jub_nombres,
       apellidos: row.jub_apellidos,
       fechaNacimiento: row.jub_fecha_nacimiento,
+      sexo: row.jub_sexo,
       dpi: row.jub_dpi,
       direccion: row.jub_direccion,
       profesionOficio: row.jub_profesion_oficio,

@@ -8,6 +8,7 @@ SELECT
   dpr_intereses,
   dpr_saldo,
   dpr_mora,
+  dpr_seguro,
   dpr_fecha_creacion,
   dpr_usuario_creacion
 FROM RPJ_MNT_DETALLE_PRESTAMO

@@ -9,8 +9,9 @@ INSERT INTO RPJ_MNT_EMPLEADO (
   emp_estado_civil,
   emp_profesion_oficio,
   emp_fecha_nacimiento,
+  emp_sexo,
   emp_tipo_puesto,
   emp_id_puesto,
   emp_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
