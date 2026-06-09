@@ -7,20 +7,19 @@ const sql = (file) => getSql(`reportes/regimen/${file}.sql`).replace("/*WHERE_CL
 const number = (v) => Number(v || 0);
 
 const mapPrestamo = (row) => ({
-  id: row.prr_id,
-  noContrato: row.prr_no_contrato,
-  tipoPersona: row.prr_tipo_persona,
+  id: row.prr_correlativo,
+  noReferencia: row.prr_no_referencia,
   personaNombre: row.persona_nombre,
   manejoDescripcion: row.manejo_descripcion,
   bancoNombre: row.banco_nombre,
   monto: number(row.prr_monto),
-  cuota: number(row.prr_cuota),
-  plazoMeses: row.prr_plazo_meses,
+  valorMes: number(row.prr_valor_mes),
+  saldo: number(row.prr_saldo),
+  noCuotas: row.prr_no_cuotas,
   fechaInicio: row.prr_fecha_inicio,
   fechaFin: row.prr_fecha_fin,
-  tasaInteres: number(row.prr_tasa_interes),
+  uso: row.prr_uso,
   estado: row.prr_estado,
-  observaciones: row.prr_observaciones,
   fechaCreacion: row.prr_fecha_creacion
 });
 

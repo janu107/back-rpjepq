@@ -1,18 +1,28 @@
 SELECT
-  d.dpl_id,
-  d.dpl_tipo_manejo,
-  d.dpl_tipo_persona,
-  d.dpl_id_persona,
-  d.dpl_id_banco,
-  d.dpl_no_cuenta,
-  d.dpl_forma_pago,
-  d.dpl_tipo_cuenta,
-  d.dpl_estado,
-  d.dpl_fecha_creacion,
-  d.dpl_usuario_creacion,
-  b.ban_nombre AS banco_nombre,
-  m.man_descripcion AS manejo_descripcion
+  d.dat_correlativo,
+  d.dat_tipo_manejo,
+  d.dat_id_empleado,
+  d.dat_id_banco,
+  d.dat_forma_pago,
+  d.dat_cuenta,
+  d.dat_tipo_cuenta,
+  d.dat_aplica_desc_igss,
+  d.dat_aplica_desc_isr,
+  d.dat_aplica_seguro,
+  d.dat_no_probidad,
+  d.dat_no_sobrevivencia,
+  d.dat_fecha_creacion,
+  d.dat_usuario_creacion,
+  b.ban_descripcion AS banco_nombre,
+  m.man_descripcion AS manejo_descripcion,
+  CASE
+    WHEN UPPER(m.man_descripcion) LIKE '%JUBILAD%'
+      THEN COALESCE(CONCAT(j.jub_nombres, ' ', j.jub_apellidos), CONCAT(e.emp_nombres, ' ', e.emp_apellidos))
+    ELSE COALESCE(CONCAT(e.emp_nombres, ' ', e.emp_apellidos), CONCAT(j.jub_nombres, ' ', j.jub_apellidos))
+  END AS persona_nombre
 FROM RPJ_MNT_DATOS_PLANILLA d
-LEFT JOIN RPJ_CAT_BANCOS b ON b.ban_id = d.dpl_id_banco
-LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = d.dpl_tipo_manejo
-ORDER BY d.dpl_id DESC;
+LEFT JOIN RPJ_CAT_BANCOS b ON b.ban_id = d.dat_id_banco
+LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = d.dat_tipo_manejo
+LEFT JOIN RPJ_MNT_EMPLEADO e ON e.emp_correlativo = d.dat_id_empleado
+LEFT JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = d.dat_id_empleado
+ORDER BY d.dat_correlativo DESC;

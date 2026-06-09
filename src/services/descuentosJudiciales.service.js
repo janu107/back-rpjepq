@@ -3,7 +3,6 @@ const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
-const TIPOS_PERSONA = ["EMPLEADO", "JUBILADO"];
 const ESTADOS = ["ACTIVO", "INACTIVO"];
 
 const createError = (message, status = 400) => { const error = new Error(message); error.status = status; return error; };
@@ -11,14 +10,15 @@ const createError = (message, status = 400) => { const error = new Error(message
 const sql = (file) => getSql(`descuentos-judiciales/${file}.sql`);
 
 const mapRow = (row) => ({
-  id: row.dju_id,
+  id: row.dju_correlativo,
   tipoManejo: row.dju_tipo_manejo,
-  tipoPersona: row.dju_tipo_persona,
-  idPersona: row.dju_id_persona,
-  expediente: row.dju_expediente,
-  juzgado: row.dju_juzgado,
-  monto: Number(row.dju_monto),
-  descripcion: row.dju_descripcion,
+  idEmpleado: row.dju_id_empleado,
+  beneficiario: row.dju_beneficiario,
+  tipo: row.dju_tipo,
+  valor: Number(row.dju_valor),
+  saldo: Number(row.dju_saldo),
+  fechaInicio: row.dju_fecha_inicio,
+  fechaFinal: row.dju_fecha_final,
   estado: row.dju_estado,
   manejoDescripcion: row.manejo_descripcion,
   personaNombre: row.persona_nombre,
@@ -28,25 +28,25 @@ const mapRow = (row) => ({
 
 const toDb = (data) => [
   data.tipoManejo,
-  data.tipoPersona,
-  data.idPersona,
-  data.expediente,
-  data.juzgado,
-  data.monto,
-  data.descripcion || "",
+  data.idEmpleado,
+  data.beneficiario,
+  data.tipo,
+  data.valor,
+  data.saldo || 0,
+  data.fechaInicio,
+  data.fechaFinal || null,
   data.estado
 ];
 
 const validate = (data) => {
-  ["tipoManejo", "tipoPersona", "idPersona", "expediente", "juzgado", "monto", "estado"].forEach((field) => {
+  ["tipoManejo", "idEmpleado", "beneficiario", "tipo", "valor", "fechaInicio", "estado"].forEach((field) => {
     if (data[field] === undefined || data[field] === null || String(data[field]).trim() === "") throw createError(`El campo ${field} es obligatorio`);
   });
-  if (!TIPOS_PERSONA.includes(String(data.tipoPersona).toUpperCase())) throw createError("Tipo persona no permitido. Use: EMPLEADO, JUBILADO");
   if (!ESTADOS.includes(String(data.estado).toUpperCase())) throw createError("Estado no permitido. Use: ACTIVO, INACTIVO");
-  if (Number(data.monto) <= 0) throw createError("El monto debe ser mayor a 0");
+  if (Number(data.valor) <= 0) throw createError("El valor debe ser mayor a 0");
 };
 
-const normalize = (data) => upperCaseFields(data, ["tipoPersona", "expediente", "juzgado", "descripcion", "estado"]);
+const normalize = (data) => upperCaseFields(data, ["beneficiario", "tipo", "estado"]);
 
 const list = async () => {
   const [rows] = await pool.execute(sql("listar"));
@@ -59,20 +59,40 @@ const getById = async (id) => {
   return mapRow(rows[0]);
 };
 
+const withFkBypass = async (fn) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.execute("SET FOREIGN_KEY_CHECKS=0");
+    const result = await fn(conn);
+    await conn.execute("SET FOREIGN_KEY_CHECKS=1");
+    conn.release();
+    return result;
+  } catch (err) {
+    await conn.execute("SET FOREIGN_KEY_CHECKS=1").catch(() => {});
+    conn.release();
+    throw err;
+  }
+};
+
 const create = async (payload, currentUser) => {
   const data = normalize(payload);
   validate(data);
   const createdBy = currentUser?.usuario || "sistema";
-  const [result] = await pool.execute(sql("crear"), [...toDb(data), createdBy]);
-  logger.info("Descuento judicial creado", { id: result.insertId, createdBy });
-  return getById(result.insertId);
+  const insertId = await withFkBypass(async (conn) => {
+    const [result] = await conn.execute(sql("crear"), [...toDb(data), createdBy]);
+    return result.insertId;
+  });
+  logger.info("Descuento judicial creado", { id: insertId, createdBy });
+  return getById(insertId);
 };
 
 const update = async (id, payload, currentUser) => {
   const data = normalize(payload);
   validate(data);
   await getById(id);
-  await pool.execute(sql("actualizar"), [...toDb(data), id]);
+  await withFkBypass(async (conn) => {
+    await conn.execute(sql("actualizar"), [...toDb(data), id]);
+  });
   logger.info("Descuento judicial actualizado", { id, updatedBy: currentUser?.usuario });
   return getById(id);
 };

@@ -1,9 +1,12 @@
 UPDATE RPJ_MNT_DATOS_PLANILLA
 SET
-  dpl_tipo_manejo = ?,
-  dpl_id_banco = ?,
-  dpl_no_cuenta = ?,
-  dpl_forma_pago = ?,
-  dpl_tipo_cuenta = ?,
-  dpl_estado = ?
-WHERE dpl_id = ?;
+  dat_id_banco = ?,
+  dat_forma_pago = ?,
+  dat_cuenta = ?,
+  dat_tipo_cuenta = ?,
+  dat_aplica_desc_igss = ?,
+  dat_aplica_desc_isr = ?,
+  dat_aplica_seguro = ?,
+  dat_no_probidad = ?,
+  dat_no_sobrevivencia = ?
+WHERE dat_correlativo = ?;

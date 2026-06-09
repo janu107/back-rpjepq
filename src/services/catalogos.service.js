@@ -10,10 +10,10 @@ const FRECUENCIAS_PLANILLA = ["MENSUAL", "QUINCENAL", "ANUAL", "TEMPORAL"];
 const catalogs = {
   bancos: {
     dir: "bancos",
-    required: ["nombre"],
-    upperFields: ["nombre"],
-    toDb: (data) => [data.nombre, data.estado || "ACTIVO"],
-    toResponse: (row) => ({ id: row.ban_id, nombre: row.ban_nombre, estado: row.ban_estado, fechaCreacion: row.ban_fecha_creacion, usuarioCreacion: row.ban_usuario_creacion })
+    required: ["descripcion"],
+    upperFields: ["descripcion"],
+    toDb: (data) => [data.descripcion],
+    toResponse: (row) => ({ id: row.ban_id, descripcion: row.ban_descripcion, fechaCreacion: row.ban_fecha_creacion, usuarioCreacion: row.ban_usuario_creacion })
   },
   areas: {
     dir: "areas",

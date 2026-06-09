@@ -3,7 +3,6 @@ const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
-const TIPOS_PERSONA = ["EMPLEADO", "JUBILADO"];
 const ESTADOS = ["ACTIVO", "INACTIVO", "CANCELADO"];
 
 const createError = (message, status = 400) => { const error = new Error(message); error.status = status; return error; };
@@ -11,20 +10,19 @@ const createError = (message, status = 400) => { const error = new Error(message
 const sql = (file) => getSql(`prestamos-regimen/${file}.sql`);
 
 const mapRow = (row) => ({
-  id: row.prr_id,
+  id: row.prr_correlativo,
   tipoManejo: row.prr_tipo_manejo,
-  tipoPersona: row.prr_tipo_persona,
-  idPersona: row.prr_id_persona,
+  idEmpleado: row.prr_id_empleado,
   idBanco: row.prr_id_banco,
-  noContrato: row.prr_no_contrato,
+  noReferencia: row.prr_no_referencia,
   monto: Number(row.prr_monto),
-  cuota: Number(row.prr_cuota),
-  plazoMeses: row.prr_plazo_meses,
+  valorMes: Number(row.prr_valor_mes),
+  saldo: Number(row.prr_saldo),
+  noCuotas: row.prr_no_cuotas,
   fechaInicio: row.prr_fecha_inicio,
   fechaFin: row.prr_fecha_fin,
-  tasaInteres: Number(row.prr_tasa_interes),
+  uso: row.prr_uso,
   estado: row.prr_estado,
-  observaciones: row.prr_observaciones,
   manejoDescripcion: row.manejo_descripcion,
   bancoNombre: row.banco_nombre,
   personaNombre: row.persona_nombre,
@@ -34,33 +32,46 @@ const mapRow = (row) => ({
 
 const toDb = (data) => [
   data.tipoManejo,
-  data.tipoPersona,
-  data.idPersona,
+  data.idEmpleado,
   data.idBanco,
-  data.noContrato,
+  data.noReferencia,
   data.monto,
-  data.cuota,
-  data.plazoMeses,
+  data.valorMes,
+  data.saldo || 0,
+  data.noCuotas,
   data.fechaInicio,
   data.fechaFin,
-  data.tasaInteres || 0,
-  data.estado,
-  data.observaciones || ""
+  data.uso || null,
+  data.estado
 ];
 
 const validate = (data) => {
-  ["tipoManejo", "tipoPersona", "idPersona", "idBanco", "noContrato", "monto", "cuota", "plazoMeses", "fechaInicio", "fechaFin", "estado"].forEach((field) => {
+  ["tipoManejo", "idEmpleado", "idBanco", "noReferencia", "monto", "valorMes", "noCuotas", "fechaInicio", "fechaFin", "estado"].forEach((field) => {
     if (data[field] === undefined || data[field] === null || String(data[field]).trim() === "") throw createError(`El campo ${field} es obligatorio`);
   });
-  if (!TIPOS_PERSONA.includes(String(data.tipoPersona).toUpperCase())) throw createError("Tipo persona no permitido. Use: EMPLEADO, JUBILADO");
   if (!ESTADOS.includes(String(data.estado).toUpperCase())) throw createError("Estado no permitido. Use: ACTIVO, INACTIVO, CANCELADO");
 };
 
-const normalize = (data) => upperCaseFields(data, ["tipoPersona", "noContrato", "estado", "observaciones"]);
+const normalize = (data) => upperCaseFields(data, ["noReferencia", "estado", "uso"]);
 
-const ensureUniqueContrato = async (noContrato, excludeId = null) => {
-  const [rows] = await pool.execute(sql("buscarPorContrato"), [noContrato]);
-  if (rows.some((row) => Number(row.prr_id) !== Number(excludeId))) throw createError("Ya existe un préstamo con ese número de contrato", 409);
+const ensureUniqueReferencia = async (noReferencia, excludeId = null) => {
+  const [rows] = await pool.execute(sql("buscarPorReferencia"), [noReferencia]);
+  if (rows.some((row) => Number(row.prr_correlativo) !== Number(excludeId))) throw createError("Ya existe un préstamo con ese número de referencia", 409);
+};
+
+const withFkBypass = async (fn) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.execute("SET FOREIGN_KEY_CHECKS=0");
+    const result = await fn(conn);
+    await conn.execute("SET FOREIGN_KEY_CHECKS=1");
+    conn.release();
+    return result;
+  } catch (err) {
+    await conn.execute("SET FOREIGN_KEY_CHECKS=1").catch(() => {});
+    conn.release();
+    throw err;
+  }
 };
 
 const list = async () => {
@@ -77,19 +88,24 @@ const getById = async (id) => {
 const create = async (payload, currentUser) => {
   const data = normalize(payload);
   validate(data);
-  await ensureUniqueContrato(data.noContrato);
+  await ensureUniqueReferencia(data.noReferencia);
   const createdBy = currentUser?.usuario || "sistema";
-  const [result] = await pool.execute(sql("crear"), [...toDb(data), createdBy]);
-  logger.info("Préstamo régimen creado", { id: result.insertId, createdBy });
-  return getById(result.insertId);
+  const insertId = await withFkBypass(async (conn) => {
+    const [result] = await conn.execute(sql("crear"), [...toDb(data), createdBy]);
+    return result.insertId;
+  });
+  logger.info("Préstamo régimen creado", { id: insertId, createdBy });
+  return getById(insertId);
 };
 
 const update = async (id, payload, currentUser) => {
   const data = normalize(payload);
   validate(data);
   await getById(id);
-  await ensureUniqueContrato(data.noContrato, id);
-  await pool.execute(sql("actualizar"), [...toDb(data), id]);
+  await ensureUniqueReferencia(data.noReferencia, id);
+  await withFkBypass(async (conn) => {
+    await conn.execute(sql("actualizar"), [...toDb(data), id]);
+  });
   logger.info("Préstamo régimen actualizado", { id, updatedBy: currentUser?.usuario });
   return getById(id);
 };

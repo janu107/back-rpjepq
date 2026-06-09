@@ -5,8 +5,8 @@ const list = async (req, res, next) => { try { return successResponse(res, await
 const getById = async (req, res, next) => { try { return successResponse(res, await service.getById(req.params.id), "Datos planilla obtenidos correctamente"); } catch (error) { next(error); } };
 const getByPersona = async (req, res, next) => {
   try {
-    const { tipoPersona, idPersona } = req.query;
-    const data = await service.getByPersona(tipoPersona, idPersona);
+    const { tipoManejo, idEmpleado } = req.query;
+    const data = await service.getByPersona(tipoManejo, idEmpleado);
     return successResponse(res, data, "Datos planilla obtenidos correctamente");
   } catch (error) { next(error); }
 };

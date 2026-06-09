@@ -1,23 +1,24 @@
 SELECT
-  d.dju_id,
+  d.dju_correlativo,
   d.dju_tipo_manejo,
-  d.dju_tipo_persona,
-  d.dju_id_persona,
-  d.dju_expediente,
-  d.dju_juzgado,
-  d.dju_monto,
-  d.dju_descripcion,
+  d.dju_id_empleado,
+  d.dju_beneficiario,
+  d.dju_tipo,
+  d.dju_valor,
+  d.dju_saldo,
+  d.dju_fecha_inicio,
+  d.dju_fecha_final,
   d.dju_estado,
   d.dju_fecha_creacion,
   d.dju_usuario_creacion,
   m.man_descripcion AS manejo_descripcion,
   CASE
-    WHEN d.dju_tipo_persona = 'EMPLEADO' THEN CONCAT(e.emp_nombres, ' ', e.emp_apellidos)
-    WHEN d.dju_tipo_persona = 'JUBILADO' THEN CONCAT(j.jub_nombres, ' ', j.jub_apellidos)
-    ELSE NULL
+    WHEN UPPER(m.man_descripcion) LIKE '%JUBILAD%'
+      THEN COALESCE(CONCAT(j.jub_nombres, ' ', j.jub_apellidos), CONCAT(e.emp_nombres, ' ', e.emp_apellidos))
+    ELSE COALESCE(CONCAT(e.emp_nombres, ' ', e.emp_apellidos), CONCAT(j.jub_nombres, ' ', j.jub_apellidos))
   END AS persona_nombre
 FROM RPJ_MNT_DESC_JUDICIALES d
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = d.dju_tipo_manejo
-LEFT JOIN RPJ_MNT_EMPLEADO e ON d.dju_tipo_persona = 'EMPLEADO' AND e.emp_correlativo = d.dju_id_persona
-LEFT JOIN RPJ_MNT_JUBILADO j ON d.dju_tipo_persona = 'JUBILADO' AND j.jub_correlativo = d.dju_id_persona
-ORDER BY d.dju_id DESC;
+LEFT JOIN RPJ_MNT_EMPLEADO e ON e.emp_correlativo = d.dju_id_empleado
+LEFT JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = d.dju_id_empleado
+ORDER BY d.dju_correlativo DESC;

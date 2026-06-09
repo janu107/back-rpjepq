@@ -1,11 +1,12 @@
 UPDATE RPJ_MNT_DESC_JUDICIALES
 SET
   dju_tipo_manejo = ?,
-  dju_tipo_persona = ?,
-  dju_id_persona = ?,
-  dju_expediente = ?,
-  dju_juzgado = ?,
-  dju_monto = ?,
-  dju_descripcion = ?,
+  dju_id_empleado = ?,
+  dju_beneficiario = ?,
+  dju_tipo = ?,
+  dju_valor = ?,
+  dju_saldo = ?,
+  dju_fecha_inicio = ?,
+  dju_fecha_final = ?,
   dju_estado = ?
-WHERE dju_id = ?;
+WHERE dju_correlativo = ?;
