@@ -8,7 +8,7 @@ const ESTADOS_CIVILES = ["SOLTERO", "CASADO", "UNIDO", "DIVORCIADO", "VIUDO"];
 // Version IV: el tipo de puesto del empleado debe limitarse a FIJO / CONTRATO / TEMPORAL.
 const TIPOS_PUESTO = ["FIJO", "CONTRATO", "TEMPORAL"];
 const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO", "JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
-const SEXOS = ["MASCULINO", "FEMENINO"];
+const SEXOS = ["M", "F"];
 
 const configs = {
   empleados: {
