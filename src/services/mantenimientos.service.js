@@ -9,6 +9,12 @@ const ESTADOS_CIVILES = ["SOLTERO", "CASADO", "UNIDO", "DIVORCIADO", "VIUDO"];
 const TIPOS_PUESTO = ["FIJO", "CONTRATO", "TEMPORAL"];
 const TIPOS_JUNTA = ["TITULAR", "SUPLENTE", "OTRO", "JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
 const SEXOS = ["M", "F"];
+const normalizeSexo = (val) => {
+  const v = String(val || "").toUpperCase();
+  if (v === "MASCULINO") return "M";
+  if (v === "FEMENINO") return "F";
+  return v;
+};
 
 const configs = {
   empleados: {
@@ -25,7 +31,7 @@ const configs = {
     upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "tipoPuesto"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
-      validateOption(data.sexo, SEXOS, "Sexo no permitido. Use: MASCULINO, FEMENINO");
+      validateOption(data.sexo, SEXOS, "Sexo no permitido.");
       validateOption(data.tipoPuesto, TIPOS_PUESTO, "Tipo puesto no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
     },
@@ -78,7 +84,7 @@ const configs = {
     upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "estado"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
-      validateOption(data.sexo, SEXOS, "Sexo no permitido. Use: MASCULINO, FEMENINO");
+      validateOption(data.sexo, SEXOS, "Sexo no permitido.");
       validateOption(data.estado, ESTADOS, "Estado no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
       validateDate(data.fechaJubilacion, "Fecha de jubilacion invalida");
@@ -230,7 +236,11 @@ const ensureUniqueId = async (config, idValue, excludeId = null) => {
 };
 
 // Convierte a MAYUSCULAS los campos de texto configurados para cada modulo.
-const normalizeData = (config, data) => (config.upperFields ? upperCaseFields(data, config.upperFields) : data);
+const normalizeData = (config, data) => {
+  let d = config.upperFields ? upperCaseFields(data, config.upperFields) : data;
+  if (d.sexo !== undefined) d = { ...d, sexo: normalizeSexo(d.sexo) };
+  return d;
+};
 
 const list = async (key) => {
   const config = getConfig(key);
