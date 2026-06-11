@@ -34,6 +34,7 @@ const configs = {
       validateOption(data.sexo, SEXOS, "Sexo no permitido.");
       validateOption(data.tipoPuesto, TIPOS_PUESTO, "Tipo puesto no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
+      if (data.fechaIngreso) validateDate(data.fechaIngreso, "Fecha de ingreso invalida");
     },
     toDb: (data) => [
       data.tipoManejo,
@@ -46,6 +47,7 @@ const configs = {
       data.estadoCivil,
       data.profesionOficio || "",
       data.fechaNacimiento,
+      data.fechaIngreso || null,
       data.sexo,
       data.tipoPuesto,
       data.idPuesto
@@ -62,6 +64,7 @@ const configs = {
       estadoCivil: row.emp_estado_civil,
       profesionOficio: row.emp_profesion_oficio,
       fechaNacimiento: row.emp_fecha_nacimiento,
+      fechaIngreso: row.emp_fecha_ingreso,
       sexo: row.emp_sexo,
       tipoPuesto: row.emp_tipo_puesto,
       idPuesto: row.emp_id_puesto,
