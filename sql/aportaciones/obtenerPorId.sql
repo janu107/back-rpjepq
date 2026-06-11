@@ -12,6 +12,7 @@ SELECT
   a.apo_tiene_prestamo,
   a.apo_motivo_retiro,
   a.apo_fecha_nacimiento,
+  a.apo_sexo,
   a.apo_ubicacion,
   a.apo_fecha_creacion,
   a.apo_usuario_creacion,

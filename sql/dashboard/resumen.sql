@@ -1,0 +1,4 @@
+SELECT
+  (SELECT COUNT(*) FROM RPJ_MNT_EMPLEADO) AS total_regimen,
+  (SELECT COUNT(*) FROM RPJ_MNT_APORTACION_EPQ) AS total_aportaciones,
+  (SELECT COUNT(*) FROM RPJ_MNT_JUBILADO) AS total_jubilados;

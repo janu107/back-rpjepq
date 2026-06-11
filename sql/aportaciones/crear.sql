@@ -11,7 +11,8 @@ INSERT INTO RPJ_MNT_APORTACION_EPQ (
   apo_tiene_prestamo,
   apo_motivo_retiro,
   apo_fecha_nacimiento,
+  apo_sexo,
   apo_ubicacion,
   apo_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

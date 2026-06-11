@@ -12,5 +12,7 @@ router.get("/junta-directiva", controller.juntaDirectiva);
 router.get("/dietas", controller.dietas);
 router.get("/empleados-regimen", controller.empleadosRegimen);
 router.get("/aportaciones", controller.aportaciones);
+router.get("/aportaciones/:id/detalle", controller.detalleAportacion);
+router.get("/resumen-empleados", controller.resumenEmpleados);
 
 module.exports = router;

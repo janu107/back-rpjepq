@@ -1,6 +1,6 @@
 const adminPagos = require("./adminPagos.service");
 module.exports = {
-  list: () => adminPagos.list("salarios"),
+  list: (query) => adminPagos.list("salarios", query),
   getById: (id) => adminPagos.getById("salarios", id),
   create: (payload, user) => adminPagos.create("salarios", payload, user),
   bulkCreate: (payload, user) => adminPagos.bulkCreate("salarios", payload.salarios, user),

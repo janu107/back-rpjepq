@@ -72,12 +72,24 @@ const mapAportacion = (row) => ({
   aportanteId: row.apo_id,
   nombre: row.apo_nombre,
   apellido: row.apo_apellido,
+  sexo: row.apo_sexo || null,
   dpi: row.apo_dpi,
   gerencia: row.apo_gerencia,
   estado: row.apo_estado,
+  tienePrestamo: Boolean(row.apo_tiene_prestamo),
+  fechaInicio: row.apo_fecha_inicio_aportacion,
+  fechaFin: row.apo_fecha_fin_aportacion,
   manejoDescripcion: row.manejo_descripcion,
   totalAportado: number(row.total_aportado),
   cantidadAportes: number(row.cantidad_aportes)
+});
+
+const mapDetalleAportacion = (row) => ({
+  id: row.dap_correlativo,
+  fechaPago: row.dap_fecha_pago,
+  valor: number(row.dap_valor),
+  fechaCreacion: row.dap_fecha_creacion,
+  usuarioCreacion: row.dap_usuario_creacion
 });
 
 const getPrestamosRegimen = async () => {
@@ -110,4 +122,24 @@ const getAportaciones = async () => {
   return rows.map(mapAportacion);
 };
 
-module.exports = { getPrestamosRegimen, getJuntaDirectiva, getDietas, getEmpleadosRegimen, getAportaciones };
+const getDetalleAportacion = async (idAportacion) => {
+  logger.info("Detalle de aportacion solicitado", { idAportacion });
+  const [rows] = await pool.execute(getSql("reportes/regimen/reporteAportacionesDetalle.sql"), [idAportacion]);
+  return rows.map(mapDetalleAportacion);
+};
+
+const getResumenEmpleados = async () => {
+  logger.info("Resumen de empleados para dashboard solicitado");
+  const [rows] = await pool.query(getSql("dashboard/resumen.sql"));
+  const row = rows[0] || {};
+  const totalRegimen = Number(row.total_regimen || 0);
+  const totalAportaciones = Number(row.total_aportaciones || 0);
+  const totalJubilados = Number(row.total_jubilados || 0);
+  return {
+    labels: ["REGIMEN", "APORTACIONES", "JUBILADOS"],
+    data: [totalRegimen, totalAportaciones, totalJubilados],
+    totalGeneral: totalRegimen + totalAportaciones + totalJubilados
+  };
+};
+
+module.exports = { getPrestamosRegimen, getJuntaDirectiva, getDietas, getEmpleadosRegimen, getAportaciones, getDetalleAportacion, getResumenEmpleados };

@@ -4,7 +4,7 @@ const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
 const ESTADOS = ["ACTIVO", "INACTIVO", "RETIRADO"];
-// Campos de texto de la aportacion que se guardan en MAYUSCULAS (Version IV).
+const SEXOS = ["M", "F"];
 const UPPER_FIELDS = ["nombre", "apellido", "gerencia", "ubicacion", "motivoRetiro"];
 
 const createError = (message, status = 400) => {
@@ -17,6 +17,13 @@ const validateDate = (value, label) => {
   if (!value || Number.isNaN(Date.parse(value))) {
     throw createError(`${label} invalida`);
   }
+};
+
+const normalizeSexo = (val) => {
+  const v = String(val || "").toUpperCase();
+  if (v === "MASCULINO") return "M";
+  if (v === "FEMENINO") return "F";
+  return v;
 };
 
 const normalizeBool = (value) => (value === true || value === 1 || value === "1" ? 1 : 0);
@@ -37,6 +44,7 @@ const mapAportacion = (row) => ({
   tienePrestamo: Boolean(row.apo_tiene_prestamo),
   motivoRetiro: row.apo_motivo_retiro,
   fechaNacimiento: row.apo_fecha_nacimiento,
+  sexo: row.apo_sexo || null,
   ubicacion: row.apo_ubicacion,
   manejoDescripcion: row.manejo_descripcion,
   fechaCreacion: row.apo_fecha_creacion,
@@ -54,6 +62,10 @@ const validatePayload = (data) => {
     throw createError("Estado no permitido");
   }
 
+  if (data.sexo && !SEXOS.includes(String(data.sexo).toUpperCase())) {
+    throw createError("Sexo no permitido.");
+  }
+
   validateDate(data.fechaInicioAportacion, "Fecha inicio aportacion");
   if (data.fechaFinAportacion) validateDate(data.fechaFinAportacion, "Fecha fin aportacion");
   validateDate(data.fechaNacimiento, "Fecha nacimiento");
@@ -66,7 +78,6 @@ const ensureUniqueDpi = async (dpi, excludeId = null) => {
   }
 };
 
-// Valida que el ID visible de aportacion (apo_id) no este duplicado (Version IV).
 const ensureUniqueApoId = async (idAportacion, excludeId = null) => {
   const [rows] = await pool.execute(getSql("aportaciones/buscarPorIdAportacion.sql"), [idAportacion]);
   if (rows.some((row) => Number(row.apo_correlativo) !== Number(excludeId))) {
@@ -87,6 +98,7 @@ const toDb = (data) => [
   normalizeBool(data.tienePrestamo),
   data.motivoRetiro || null,
   data.fechaNacimiento,
+  data.sexo || null,
   data.ubicacion
 ];
 
@@ -98,6 +110,12 @@ const applyDefaultManejo = async (payload) => {
     return payload;
   }
   return { ...payload, tipoManejo: rows[0].man_id };
+};
+
+const normalizeData = (data) => {
+  let d = upperCaseFields(data, UPPER_FIELDS);
+  if (d.sexo !== undefined && d.sexo !== null) d = { ...d, sexo: normalizeSexo(d.sexo) };
+  return d;
 };
 
 const list = async () => {
@@ -113,7 +131,7 @@ const getById = async (id) => {
 };
 
 const create = async (payload, currentUser) => {
-  const data = upperCaseFields(await applyDefaultManejo(payload), UPPER_FIELDS);
+  const data = normalizeData(await applyDefaultManejo(payload));
   validatePayload(data);
   await ensureUniqueDpi(data.dpi);
   await ensureUniqueApoId(data.idAportacion);
@@ -131,7 +149,7 @@ const create = async (payload, currentUser) => {
 };
 
 const update = async (id, payload, currentUser) => {
-  const data = upperCaseFields(await applyDefaultManejo(payload), UPPER_FIELDS);
+  const data = normalizeData(await applyDefaultManejo(payload));
   validatePayload(data);
   await getById(id);
   await ensureUniqueDpi(data.dpi, id);

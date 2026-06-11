@@ -12,5 +12,6 @@ SET
   apo_tiene_prestamo = ?,
   apo_motivo_retiro = ?,
   apo_fecha_nacimiento = ?,
+  apo_sexo = ?,
   apo_ubicacion = ?
 WHERE apo_correlativo = ?;

@@ -1,6 +1,8 @@
 SELECT
   s.sal_correlativo,
   s.sal_tipo_manejo,
+  s.sal_id_empleado,
+  s.sal_id_jubilado,
   s.sal_tipo_ingreso,
   s.sal_salario,
   s.sal_fecha_creacion,

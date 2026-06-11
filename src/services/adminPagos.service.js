@@ -10,10 +10,12 @@ const configs = {
     dir: "salarios",
     required: ["tipoManejo", "tipoIngreso", "salario"],
     validate: (data) => validateAmount(data.salario, "Salario"),
-    toDb: (data) => [data.tipoManejo, data.tipoIngreso, data.salario],
+    toDb: (data) => [data.tipoManejo, data.idEmpleado || null, data.idJubilado || null, data.tipoIngreso, data.salario],
     toResponse: (row) => ({
       id: row.sal_correlativo,
       tipoManejo: row.sal_tipo_manejo,
+      idEmpleado: row.sal_id_empleado || null,
+      idJubilado: row.sal_id_jubilado || null,
       tipoIngreso: row.sal_tipo_ingreso,
       salario: Number(row.sal_salario),
       manejoDescripcion: row.manejo_descripcion,
@@ -179,9 +181,9 @@ const validatePayload = (config, payload) => {
 const assertUniqueSalaryTypesInPayload = (items) => {
   const seen = new Set();
   items.forEach((item) => {
-    const key = `${item.tipoManejo}-${item.tipoIngreso}`;
+    const key = `${item.tipoManejo}-${item.idEmpleado || "null"}-${item.idJubilado || "null"}-${item.tipoIngreso}`;
     if (seen.has(key)) {
-      throw createError("El tipo de ingreso no se puede repetir para el mismo manejo", 409);
+      throw createError("El tipo de ingreso no se puede repetir para el mismo empleado/manejo", 409);
     }
     seen.add(key);
   });
@@ -191,6 +193,8 @@ const salaryTypeExists = async (data, executor = pool) => {
   const [rows] = await executor.execute(getSql("salarios/buscarDuplicado.sql"), [
     data.tipoManejo,
     data.tipoIngreso,
+    data.idEmpleado || null,
+    data.idJubilado || null,
     null,
     null
   ]);
@@ -201,20 +205,28 @@ const ensureUniqueSalaryType = async (data, excludeId = null, executor = pool) =
   const [rows] = await executor.execute(getSql("salarios/buscarDuplicado.sql"), [
     data.tipoManejo,
     data.tipoIngreso,
+    data.idEmpleado || null,
+    data.idJubilado || null,
     excludeId,
     excludeId
   ]);
   if (rows.length > 0) {
-    throw createError("El tipo de ingreso ya existe para este manejo", 409);
+    throw createError("El tipo de ingreso ya existe para este empleado/manejo", 409);
   }
 };
 
 // Convierte a MAYUSCULAS los campos de texto configurados (Version IV).
 const applyUpper = (config, data) => (config.upperFields ? upperCaseFields(data, config.upperFields) : data);
 
-const list = async (key) => {
+const list = async (key, query = {}) => {
   const config = configs[key];
   logger.info("Listado modulo admin pagos", { modulo: key });
+  if (key === "salarios" && (query.idEmpleado || query.idJubilado)) {
+    const idEmpleado = query.idEmpleado ? Number(query.idEmpleado) : null;
+    const idJubilado = query.idJubilado ? Number(query.idJubilado) : null;
+    const [rows] = await pool.execute(getSql("salarios/listarPorEntidad.sql"), [idEmpleado, idJubilado]);
+    return rows.map(config.toResponse);
+  }
   const [rows] = await pool.execute(getQuery(config, "listar"));
   return rows.map(config.toResponse);
 };

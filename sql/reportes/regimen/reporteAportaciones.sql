@@ -3,6 +3,7 @@ SELECT
   a.apo_id,
   a.apo_nombre,
   a.apo_apellido,
+  a.apo_sexo,
   a.apo_dpi,
   a.apo_gerencia,
   a.apo_estado,
@@ -17,7 +18,7 @@ LEFT JOIN RPJ_MNT_DETALLE_APORTACION_EPQ d ON d.dap_id_aportacion = a.apo_correl
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = a.apo_tipo_manejo
 /*WHERE_CLAUSE*/
 GROUP BY
-  a.apo_correlativo, a.apo_id, a.apo_nombre, a.apo_apellido,
+  a.apo_correlativo, a.apo_id, a.apo_nombre, a.apo_apellido, a.apo_sexo,
   a.apo_dpi, a.apo_gerencia, a.apo_estado, a.apo_fecha_inicio_aportacion,
   a.apo_fecha_fin_aportacion, a.apo_tiene_prestamo, m.man_descripcion
 ORDER BY a.apo_correlativo DESC;
