@@ -7,6 +7,7 @@ const dietas = async (req, res, next) => { try { return successResponse(res, awa
 const empleadosRegimen = async (req, res, next) => { try { return successResponse(res, await service.getEmpleadosRegimen(), "Reporte empleados régimen obtenido"); } catch (error) { next(error); } };
 const aportaciones = async (req, res, next) => { try { return successResponse(res, await service.getAportaciones(), "Reporte aportaciones obtenido"); } catch (error) { next(error); } };
 const detalleAportacion = async (req, res, next) => { try { return successResponse(res, await service.getDetalleAportacion(req.params.id), "Detalle aportacion obtenido"); } catch (error) { next(error); } };
+const detalleAportaciones = async (req, res, next) => { try { return successResponse(res, await service.getDetalleAportaciones(), "Reporte detalle aportaciones obtenido"); } catch (error) { next(error); } };
 const resumenEmpleados = async (req, res, next) => { try { return successResponse(res, await service.getResumenEmpleados(), "Resumen empleados obtenido"); } catch (error) { next(error); } };
 
-module.exports = { prestamosRegimen, juntaDirectiva, dietas, empleadosRegimen, aportaciones, detalleAportacion, resumenEmpleados };
+module.exports = { prestamosRegimen, juntaDirectiva, dietas, empleadosRegimen, aportaciones, detalleAportacion, detalleAportaciones, resumenEmpleados };

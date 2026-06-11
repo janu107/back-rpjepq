@@ -128,6 +128,23 @@ const getDetalleAportacion = async (idAportacion) => {
   return rows.map(mapDetalleAportacion);
 };
 
+const getDetalleAportaciones = async () => {
+  logger.info("Reporte detalle aportaciones solicitado");
+  const [rows] = await pool.query(getSql("reportes/regimen/reporteDetalleAportaciones.sql"));
+  return rows.map((row) => ({
+    correlativo: row.dap_correlativo,
+    aportanteId: row.apo_id,
+    nombre: row.apo_nombre,
+    apellido: row.apo_apellido,
+    dpi: row.apo_dpi,
+    gerencia: row.apo_gerencia,
+    estado: row.apo_estado,
+    manejoDescripcion: row.manejo_descripcion,
+    fechaPago: row.dap_fecha_pago,
+    valor: number(row.dap_valor)
+  }));
+};
+
 const getResumenEmpleados = async () => {
   logger.info("Resumen de empleados para dashboard solicitado");
   const [rows] = await pool.query(getSql("dashboard/resumen.sql"));
@@ -142,4 +159,4 @@ const getResumenEmpleados = async () => {
   };
 };
 
-module.exports = { getPrestamosRegimen, getJuntaDirectiva, getDietas, getEmpleadosRegimen, getAportaciones, getDetalleAportacion, getResumenEmpleados };
+module.exports = { getPrestamosRegimen, getJuntaDirectiva, getDietas, getEmpleadosRegimen, getAportaciones, getDetalleAportacion, getDetalleAportaciones, getResumenEmpleados };
