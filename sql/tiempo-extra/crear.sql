@@ -7,4 +7,4 @@ INSERT INTO RPJ_MNT_TIEMPO_EXTRAORDINARIO (
   tex_tipo_hora,
   tex_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, 'N/A', ?);

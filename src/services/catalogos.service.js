@@ -79,7 +79,7 @@ const catalogs = {
     required: ["nombreEmpresa", "nit", "telefono", "correo"],
     // El correo NO se convierte a mayusculas (regla Version IV).
     upperFields: ["nombreEmpresa"],
-    toDb: (data) => [data.nombreEmpresa, data.nit, data.telefono, data.correo, data.iva || 0, data.porcentajePagos || 0, data.isr || 0, data.porcentajeTiempoExtra || 0, data.pagoDieta || 0],
+    toDb: (data) => [data.nombreEmpresa, data.nit, data.telefono, data.correo, data.iva || 0, data.porcentajePagos || 0, data.isr || 0, data.porcentajeTiempoExtra || 0, data.pagoDieta || 0, data.igss || 0, data.igssPatronal || 0, data.intecap || 0],
     toResponse: (row) => ({
       id: row.par_id,
       nombreEmpresa: row.par_nombre_empresa,
@@ -91,6 +91,9 @@ const catalogs = {
       isr: row.par_isr,
       porcentajeTiempoExtra: row.par_porcentaje_tiempo_extra,
       pagoDieta: row.par_pago_dieta,
+      igss: row.par_igss,
+      igssPatronal: row.par_igss_patronal,
+      intecap: row.par_intecap,
       fechaCreacion: row.par_fecha_creacion,
       usuarioCreacion: row.par_usuario_creacion
     })

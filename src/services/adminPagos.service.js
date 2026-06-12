@@ -27,30 +27,21 @@ const configs = {
   },
   "tiempo-extra": {
     dir: "tiempo-extra",
-    required: ["idEmpleado", "fechaHoraInicio", "fechaHoraFinal", "motivo", "tipoHora"],
-    upperFields: ["motivo", "tipoHora"],
+    required: ["idEmpleado", "fecha", "cantidadHoras", "motivo"],
+    upperFields: ["motivo"],
     validate: (data) => {
-      validateDate(data.fechaHoraInicio, "Fecha/hora inicio");
-      validateDate(data.fechaHoraFinal, "Fecha/hora final");
-      if (new Date(data.fechaHoraFinal) <= new Date(data.fechaHoraInicio)) throw createError("Fecha final debe ser mayor a fecha inicio");
-      if (!TIPOS_HORA.includes(String(data.tipoHora || "").toUpperCase())) throw createError("Tipo hora no permitido");
+      validateDate(data.fecha, "Fecha");
+      if (Number(data.cantidadHoras) <= 0) throw createError("Cantidad de horas debe ser mayor a 0");
+      if (Number(data.cantidadHoras) > 744) throw createError("Cantidad de horas fuera de rango");
     },
-    normalize: (data) => ({
-      ...data,
-      tipoHora: String(data.tipoHora).toUpperCase(),
-      // Version IV: el backend SIEMPRE recalcula las horas a partir de las fechas
-      // para evitar manipulacion desde el frontend.
-      cantidadHoras: calculateHours(data.fechaHoraInicio, data.fechaHoraFinal)
-    }),
-    toDb: (data) => [data.idEmpleado, data.fechaHoraInicio, data.fechaHoraFinal, data.cantidadHoras, data.motivo, data.tipoHora],
+    normalize: (data) => ({ ...data }),
+    toDb: (data) => [data.idEmpleado, `${data.fecha} 00:00:00`, `${data.fecha} 23:59:59`, data.cantidadHoras, data.motivo],
     toResponse: (row) => ({
       id: row.tex_correlativo,
       idEmpleado: row.tex_id_empleado,
-      fechaHoraInicio: row.tex_fecha_hora_inicio,
-      fechaHoraFinal: row.tex_fecha_hora_final,
+      fecha: String(row.tex_fecha_hora_inicio).slice(0, 10),
       cantidadHoras: Number(row.tex_cantidad_horas),
       motivo: row.tex_motivo,
-      tipoHora: row.tex_tipo_hora,
       empleadoNombre: `${row.emp_nombres || ""} ${row.emp_apellidos || ""}`.trim(),
       empleadoCodigo: row.emp_id,
       empleadoDpi: row.emp_dpi,

@@ -5,5 +5,5 @@ SET
   tex_fecha_hora_final = ?,
   tex_cantidad_horas = ?,
   tex_motivo = ?,
-  tex_tipo_hora = ?
+  tex_tipo_hora = 'N/A'
 WHERE tex_correlativo = ?;

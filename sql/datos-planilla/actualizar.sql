@@ -8,5 +8,6 @@ SET
   dat_aplica_desc_isr = ?,
   dat_aplica_seguro = ?,
   dat_no_probidad = ?,
-  dat_no_sobrevivencia = ?
+  dat_no_sobrevivencia = ?,
+  dat_aplica_nomina = ?
 WHERE dat_correlativo = ?;

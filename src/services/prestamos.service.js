@@ -1,8 +1,6 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
-const aportacionesService = require("./aportaciones.service");
-
 const ESTADOS = ["ACTIVO", "CANCELADO", "MORA", "ANULADO"];
 
 const createError = (message, status = 400) => {
@@ -71,11 +69,17 @@ const getById = async (id) => {
   return mapPrestamo(rows[0]);
 };
 
+const ensureNoActiveLoan = async (idAportacion, excludeId = null) => {
+  const [rows] = await pool.execute(getSql("prestamos/buscarActivoPorAportacion.sql"), [idAportacion]);
+  if (rows.some((row) => Number(row.pre_correlativo) !== Number(excludeId))) {
+    throw createError("LA PERSONA YA CUENTA CON UN PRESTAMO ACTIVO", 409);
+  }
+};
+
 const create = async (payload, currentUser) => {
   validatePayload(payload);
-  const aportacion = await aportacionesService.getById(payload.idAportacion);
-  if (aportacion.tienePrestamo && ["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
-    throw createError("El aportante ya tiene un prestamo activo", 409);
+  if (["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
+    await ensureNoActiveLoan(payload.idAportacion);
   }
   await ensureUniqueContract(payload.noContrato);
   const createdBy = currentUser?.usuario || "sistema";
@@ -99,9 +103,8 @@ const create = async (payload, currentUser) => {
 const update = async (id, payload, currentUser) => {
   validatePayload(payload);
   const current = await getById(id);
-  const aportacion = await aportacionesService.getById(payload.idAportacion);
-  if (Number(current.idAportacion) !== Number(payload.idAportacion) && aportacion.tienePrestamo && ["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
-    throw createError("El aportante ya tiene un prestamo activo", 409);
+  if (Number(current.idAportacion) !== Number(payload.idAportacion) && ["ACTIVO", "MORA"].includes(String(payload.estado).toUpperCase())) {
+    await ensureNoActiveLoan(payload.idAportacion, null);
   }
   await ensureUniqueContract(payload.noContrato, id);
   await pool.execute(getSql("prestamos/actualizar.sql"), [...toDb(payload), id]);

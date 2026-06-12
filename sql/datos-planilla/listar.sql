@@ -11,6 +11,7 @@ SELECT
   d.dat_aplica_seguro,
   d.dat_no_probidad,
   d.dat_no_sobrevivencia,
+  d.dat_aplica_nomina,
   d.dat_fecha_creacion,
   d.dat_usuario_creacion,
   b.ban_descripcion AS banco_nombre,

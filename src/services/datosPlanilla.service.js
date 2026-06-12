@@ -23,6 +23,7 @@ const mapRow = (row) => ({
   aplicaSeguro: Boolean(row.dat_aplica_seguro),
   noProbidad: row.dat_no_probidad,
   noSobrevivencia: row.dat_no_sobrevivencia,
+  aplicaNomina: row.dat_aplica_nomina !== undefined ? Boolean(row.dat_aplica_nomina) : true,
   bancoNombre: row.banco_nombre,
   manejoDescripcion: row.manejo_descripcion,
   personaNombre: row.persona_nombre,
@@ -87,6 +88,7 @@ const create = async (payload, currentUser) => {
     data.aplicaSeguro ? 1 : 0,
     data.noProbidad || null,
     data.noSobrevivencia || null,
+    data.aplicaNomina !== undefined ? (data.aplicaNomina ? 1 : 0) : 1,
     createdBy
   ];
   const insertId = await withFkBypass(async (conn) => {
@@ -111,6 +113,7 @@ const update = async (id, payload, currentUser) => {
     data.aplicaSeguro ? 1 : 0,
     data.noProbidad || null,
     data.noSobrevivencia || null,
+    data.aplicaNomina !== undefined ? (data.aplicaNomina ? 1 : 0) : 1,
     id
   ];
   await withFkBypass(async (conn) => {

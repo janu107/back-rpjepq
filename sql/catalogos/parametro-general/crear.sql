@@ -8,6 +8,9 @@ INSERT INTO RPJ_CAT_PARAMETRO_GENERAL (
   par_isr,
   par_porcentaje_tiempo_extra,
   par_pago_dieta,
+  par_igss,
+  par_igss_patronal,
+  par_intecap,
   par_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

@@ -10,6 +10,7 @@ INSERT INTO RPJ_MNT_DATOS_PLANILLA (
   dat_aplica_seguro,
   dat_no_probidad,
   dat_no_sobrevivencia,
+  dat_aplica_nomina,
   dat_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

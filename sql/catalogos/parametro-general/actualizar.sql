@@ -8,5 +8,8 @@ SET
   par_porcentaje_pagos = ?,
   par_isr = ?,
   par_porcentaje_tiempo_extra = ?,
-  par_pago_dieta = ?
+  par_pago_dieta = ?,
+  par_igss = ?,
+  par_igss_patronal = ?,
+  par_intecap = ?
 WHERE par_id = ?;

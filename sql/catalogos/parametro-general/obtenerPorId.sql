@@ -9,6 +9,9 @@ SELECT
   par_isr,
   par_porcentaje_tiempo_extra,
   par_pago_dieta,
+  par_igss,
+  par_igss_patronal,
+  par_intecap,
   par_fecha_creacion,
   par_usuario_creacion
 FROM RPJ_CAT_PARAMETRO_GENERAL
