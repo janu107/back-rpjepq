@@ -24,6 +24,7 @@ const reportesRegimenRoutes = require("./reportesRegimen.routes");
 const auditoriaRoutes = require("./auditoria.routes");
 const backupRoutes = require("./backup.routes");
 const systemRoutes = require("./system.routes");
+const planillasPensionadosRoutes = require("./planillasPensionados.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = Router();
@@ -60,5 +61,6 @@ router.use("/reportes/regimen", reportesRegimenRoutes);
 router.use("/auditoria", auditoriaRoutes);
 router.use("/backup", backupRoutes);
 router.use("/system", systemRoutes);
+router.use("/planillas-pensionados", planillasPensionadosRoutes);
 
 module.exports = router;
