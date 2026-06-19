@@ -13,6 +13,9 @@ const mapRow = (row) => ({
   id: row.prr_correlativo,
   tipoManejo: row.prr_tipo_manejo,
   idEmpleado: row.prr_id_empleado,
+  idJubilado: row.prr_id_jubilado,
+  // idPersona: id unificado, sea empleado o jubilado (lo que el front usa)
+  idPersona: row.prr_id_empleado ?? row.prr_id_jubilado,
   idBanco: row.prr_id_banco,
   noReferencia: row.prr_no_referencia,
   monto: Number(row.prr_monto),
@@ -30,9 +33,22 @@ const mapRow = (row) => ({
   usuarioCreacion: row.prr_usuario_creacion
 });
 
-const toDb = (data) => [
+// Enruta el id de la persona a la columna correcta segun el tipo de manejo:
+//   tipo_manejo = 2 (jubilado) -> prr_id_jubilado ; tipo_manejo = 1 -> prr_id_empleado
+const splitPersona = (data) => {
+  const esJubilado = Number(data.tipoManejo) === 2;
+  return {
+    idEmpleado: esJubilado ? null : data.idEmpleado,
+    idJubilado: esJubilado ? data.idEmpleado : null
+  };
+};
+
+const toDb = (data) => {
+  const persona = splitPersona(data);
+  return [
   data.tipoManejo,
-  data.idEmpleado,
+  persona.idEmpleado,
+  persona.idJubilado,
   data.idBanco,
   data.noReferencia,
   data.monto,
@@ -43,7 +59,8 @@ const toDb = (data) => [
   data.fechaFin,
   data.uso || null,
   data.estado
-];
+  ];
+};
 
 const validate = (data) => {
   ["tipoManejo", "idEmpleado", "idBanco", "noReferencia", "monto", "valorMes", "noCuotas", "fechaInicio", "fechaFin", "estado"].forEach((field) => {

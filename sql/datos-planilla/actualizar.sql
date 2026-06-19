@@ -6,6 +6,8 @@ SET
   dat_tipo_cuenta = ?,
   dat_aplica_desc_igss = ?,
   dat_aplica_desc_isr = ?,
+  dat_aplica_intecap = ?,
+  dat_aplica_dasociacion = ?,
   dat_aplica_seguro = ?,
   dat_no_probidad = ?,
   dat_no_sobrevivencia = ?,

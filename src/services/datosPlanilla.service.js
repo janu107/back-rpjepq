@@ -14,12 +14,16 @@ const mapRow = (row) => ({
   id: row.dat_correlativo,
   tipoManejo: row.dat_tipo_manejo,
   idEmpleado: row.dat_id_empleado,
+  idJubilado: row.dat_id_jubilado,
+  idPersona: row.dat_id_empleado ?? row.dat_id_jubilado,
   idBanco: row.dat_id_banco,
   formaPago: row.dat_forma_pago,
   cuenta: row.dat_cuenta,
   tipoCuenta: row.dat_tipo_cuenta,
   aplicaDescIgss: Boolean(row.dat_aplica_desc_igss),
   aplicaDescIsr: Boolean(row.dat_aplica_desc_isr),
+  aplicaIntecap: Boolean(row.dat_aplica_intecap),
+  aplicaDasociacion: Boolean(row.dat_aplica_dasociacion),
   aplicaSeguro: Boolean(row.dat_aplica_seguro),
   noProbidad: row.dat_no_probidad,
   noSobrevivencia: row.dat_no_sobrevivencia,
@@ -76,15 +80,21 @@ const create = async (payload, currentUser) => {
   const data = normalize(payload);
   validate(data);
   const createdBy = currentUser?.usuario || "sistema";
+  // Enruta el id de la persona a la columna correcta segun el tipo de manejo:
+  //   tipo_manejo = 2 (jubilado) -> dat_id_jubilado ; tipo_manejo = 1 -> dat_id_empleado
+  const esJubilado = Number(data.tipoManejo) === 2;
   const params = [
     data.tipoManejo,
-    data.idEmpleado,
+    esJubilado ? null : data.idEmpleado,
+    esJubilado ? data.idEmpleado : null,
     data.idBanco,
     data.formaPago,
     data.cuenta || "",
     data.tipoCuenta || null,
     data.aplicaDescIgss ? 1 : 0,
     data.aplicaDescIsr ? 1 : 0,
+    data.aplicaIntecap ? 1 : 0,
+    data.aplicaDasociacion ? 1 : 0,
     data.aplicaSeguro ? 1 : 0,
     data.noProbidad || null,
     data.noSobrevivencia || null,
@@ -110,6 +120,8 @@ const update = async (id, payload, currentUser) => {
     data.tipoCuenta || null,
     data.aplicaDescIgss ? 1 : 0,
     data.aplicaDescIsr ? 1 : 0,
+    data.aplicaIntecap ? 1 : 0,
+    data.aplicaDasociacion ? 1 : 0,
     data.aplicaSeguro ? 1 : 0,
     data.noProbidad || null,
     data.noSobrevivencia || null,

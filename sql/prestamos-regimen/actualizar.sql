@@ -2,6 +2,7 @@ UPDATE RPJ_MNT_PRESTAMOS_REGIMEN
 SET
   prr_tipo_manejo = ?,
   prr_id_empleado = ?,
+  prr_id_jubilado = ?,
   prr_id_banco = ?,
   prr_no_referencia = ?,
   prr_monto = ?,

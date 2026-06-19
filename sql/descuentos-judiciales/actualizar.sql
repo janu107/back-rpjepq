@@ -2,6 +2,7 @@ UPDATE RPJ_MNT_DESC_JUDICIALES
 SET
   dju_tipo_manejo = ?,
   dju_id_empleado = ?,
+  dju_id_jubilado = ?,
   dju_beneficiario = ?,
   dju_tipo = ?,
   dju_valor = ?,

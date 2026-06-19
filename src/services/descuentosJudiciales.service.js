@@ -13,6 +13,8 @@ const mapRow = (row) => ({
   id: row.dju_correlativo,
   tipoManejo: row.dju_tipo_manejo,
   idEmpleado: row.dju_id_empleado,
+  idJubilado: row.dju_id_jubilado,
+  idPersona: row.dju_id_empleado ?? row.dju_id_jubilado,
   beneficiario: row.dju_beneficiario,
   tipo: row.dju_tipo,
   valor: Number(row.dju_valor),
@@ -26,17 +28,31 @@ const mapRow = (row) => ({
   usuarioCreacion: row.dju_usuario_creacion
 });
 
-const toDb = (data) => [
-  data.tipoManejo,
-  data.idEmpleado,
-  data.beneficiario,
-  data.tipo,
-  data.valor,
-  data.saldo || 0,
-  data.fechaInicio,
-  data.fechaFinal || null,
-  data.estado
-];
+// Enruta el id de la persona a la columna correcta segun el tipo de manejo:
+//   tipo_manejo = 2 (jubilado) -> dju_id_jubilado ; tipo_manejo = 1 -> dju_id_empleado
+const splitPersona = (data) => {
+  const esJubilado = Number(data.tipoManejo) === 2;
+  return {
+    idEmpleado: esJubilado ? null : data.idEmpleado,
+    idJubilado: esJubilado ? data.idEmpleado : null
+  };
+};
+
+const toDb = (data) => {
+  const persona = splitPersona(data);
+  return [
+    data.tipoManejo,
+    persona.idEmpleado,
+    persona.idJubilado,
+    data.beneficiario,
+    data.tipo,
+    data.valor,
+    data.saldo || 0,
+    data.fechaInicio,
+    data.fechaFinal || null,
+    data.estado
+  ];
+};
 
 const validate = (data) => {
   ["tipoManejo", "idEmpleado", "beneficiario", "tipo", "valor", "fechaInicio", "estado"].forEach((field) => {

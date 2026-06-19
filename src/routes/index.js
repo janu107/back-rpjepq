@@ -25,6 +25,7 @@ const auditoriaRoutes = require("./auditoria.routes");
 const backupRoutes = require("./backup.routes");
 const systemRoutes = require("./system.routes");
 const planillasPensionadosRoutes = require("./planillasPensionados.routes");
+const planillasTrabajadoresRoutes = require("./planillasTrabajadores.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = Router();
@@ -62,5 +63,6 @@ router.use("/auditoria", auditoriaRoutes);
 router.use("/backup", backupRoutes);
 router.use("/system", systemRoutes);
 router.use("/planillas-pensionados", planillasPensionadosRoutes);
+router.use("/planillas-trabajadores", planillasTrabajadoresRoutes);
 
 module.exports = router;

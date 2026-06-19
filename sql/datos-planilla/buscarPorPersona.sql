@@ -2,6 +2,7 @@ SELECT
   d.dat_correlativo,
   d.dat_tipo_manejo,
   d.dat_id_empleado,
+  d.dat_id_jubilado,
   d.dat_id_banco,
   d.dat_forma_pago,
   d.dat_cuenta,
@@ -17,6 +18,6 @@ SELECT
   b.ban_descripcion AS banco_nombre
 FROM RPJ_MNT_DATOS_PLANILLA d
 LEFT JOIN RPJ_CAT_BANCOS b ON b.ban_id = d.dat_id_banco
-WHERE d.dat_tipo_manejo = ? AND d.dat_id_empleado = ?
+WHERE d.dat_tipo_manejo = ? AND COALESCE(d.dat_id_empleado, d.dat_id_jubilado) = ?
 ORDER BY d.dat_correlativo DESC
 LIMIT 1;
