@@ -11,5 +11,6 @@ SET
   par_pago_dieta = ?,
   par_igss = ?,
   par_igss_patronal = ?,
-  par_intecap = ?
+  par_intecap = ?,
+  par_desc_asociacion = ?
 WHERE par_id = ?;

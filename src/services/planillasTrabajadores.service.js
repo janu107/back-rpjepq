@@ -78,6 +78,12 @@ const getById = async (id) => {
 
 const create = async (payload, currentUser) => {
   validate(payload);
+  // Evitar planillas duplicadas por tipo + numero (Version VII)
+  const [dup] = await pool.execute(
+    "SELECT ppl_correlativo FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = ? AND ppl_numero = ?",
+    [TIPO_PLANILLA_EMPLEADOS, payload.numero]
+  );
+  if (dup.length) throw createError("YA EXISTE UNA PLANILLA DE EMPLEADOS CON ESE NUMERO", 409);
   const usuario = currentUser?.usuario || "sistema";
   const params = [
     TIPO_PLANILLA_EMPLEADOS, payload.numero,

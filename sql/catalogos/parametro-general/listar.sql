@@ -12,6 +12,7 @@ SELECT
   par_igss,
   par_igss_patronal,
   par_intecap,
+  par_desc_asociacion,
   par_fecha_creacion,
   par_usuario_creacion
 FROM RPJ_CAT_PARAMETRO_GENERAL

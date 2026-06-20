@@ -71,6 +71,19 @@ const catalogs = {
     dir: "tipo-planilla",
     required: ["descripcion", "idTipoUso"],
     upperFields: ["descripcion"],
+    // Evita duplicados por nombre + tipo de uso (Version VII). Normaliza trim/upper.
+    checkDuplicate: async (data, excludeId) => {
+      const desc = String(data.descripcion || "").trim().toUpperCase();
+      const [rows] = await pool.execute(
+        "SELECT tpl_id FROM RPJ_CAT_TIPO_PLANILLA WHERE UPPER(TRIM(tpl_descripcion)) = ? AND tpl_id_tipo_uso = ?",
+        [desc, data.idTipoUso]
+      );
+      if (rows.some((r) => Number(r.tpl_id) !== Number(excludeId))) {
+        const error = new Error("EL TIPO DE PLANILLA YA EXISTE");
+        error.status = 409;
+        throw error;
+      }
+    },
     toDb: (data) => ["1", data.descripcion, data.idTipoUso],
     toResponse: (row) => ({ id: row.tpl_id, tipoPlanilla: row.tpl_tipo_planilla, descripcion: row.tpl_descripcion, idTipoUso: row.tpl_id_tipo_uso, tipoUsoDescripcion: row.tipo_uso_descripcion, fechaCreacion: row.tpl_fecha_creacion, usuarioCreacion: row.tpl_usuario_creacion })
   },
@@ -79,7 +92,7 @@ const catalogs = {
     required: ["nombreEmpresa", "nit", "telefono", "correo"],
     // El correo NO se convierte a mayusculas (regla Version IV).
     upperFields: ["nombreEmpresa"],
-    toDb: (data) => [data.nombreEmpresa, data.nit, data.telefono, data.correo, data.iva || 0, data.porcentajePagos || 0, data.isr || 0, data.porcentajeTiempoExtra || 0, data.pagoDieta || 0, data.igss || 0, data.igssPatronal || 0, data.intecap || 0],
+    toDb: (data) => [data.nombreEmpresa, data.nit, data.telefono, data.correo, data.iva || 0, data.porcentajePagos || 0, data.isr || 0, data.porcentajeTiempoExtra || 0, data.pagoDieta || 0, data.igss || 0, data.igssPatronal || 0, data.intecap || 0, data.descAsociacion || 0],
     toResponse: (row) => ({
       id: row.par_id,
       nombreEmpresa: row.par_nombre_empresa,
@@ -94,6 +107,7 @@ const catalogs = {
       igss: row.par_igss,
       igssPatronal: row.par_igss_patronal,
       intecap: row.par_intecap,
+      descAsociacion: row.par_desc_asociacion,
       fechaCreacion: row.par_fecha_creacion,
       usuarioCreacion: row.par_usuario_creacion
     })
@@ -119,6 +133,18 @@ const catalogs = {
     dir: "parametro-planilla",
     required: ["tipoPlanilla", "numero", "fechaInicio", "fechaFinal", "fechaPago", "frecuencia", "estado"],
     upperFields: ["frecuencia", "estado"],
+    // Evita planillas duplicadas por tipo + numero (Version VII).
+    checkDuplicate: async (data, excludeId) => {
+      const [rows] = await pool.execute(
+        "SELECT ppl_correlativo FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = ? AND ppl_numero = ?",
+        [data.tipoPlanilla, data.numero]
+      );
+      if (rows.some((r) => Number(r.ppl_correlativo) !== Number(excludeId))) {
+        const error = new Error("LA PLANILLA YA EXISTE (mismo tipo y numero)");
+        error.status = 409;
+        throw error;
+      }
+    },
     validate: (data) => {
       if (!ESTADOS_PLANILLA.includes(String(data.estado || "").toUpperCase())) {
         const error = new Error(`Estado no permitido. Use: ${ESTADOS_PLANILLA.join(", ")}`);
@@ -200,6 +226,7 @@ const create = async (catalogKey, payload, currentUser) => {
   const catalog = getCatalog(catalogKey);
   const data = normalizePayload(catalog, payload);
   validatePayload(catalog, data);
+  if (typeof catalog.checkDuplicate === "function") await catalog.checkDuplicate(data, null);
   const createdBy = currentUser?.usuario || "sistema";
   const [result] = await pool.execute(getQuery(catalog, "crear"), [...catalog.toDb(data), createdBy]);
   logger.info("Registro de catalogo creado", { catalogo: catalogKey, id: result.insertId, createdBy });
@@ -210,6 +237,7 @@ const update = async (catalogKey, id, payload, currentUser) => {
   const catalog = getCatalog(catalogKey);
   const data = normalizePayload(catalog, payload);
   validatePayload(catalog, data);
+  if (typeof catalog.checkDuplicate === "function") await catalog.checkDuplicate(data, id);
   await getById(catalogKey, id);
   await pool.execute(getQuery(catalog, "actualizar"), [...catalog.toDb(data), id]);
   logger.info("Registro de catalogo actualizado", { catalogo: catalogKey, id, updatedBy: currentUser?.usuario });
