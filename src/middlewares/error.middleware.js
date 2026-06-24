@@ -32,14 +32,19 @@ const errorHandler = (err, req, res, next) => {
   const isProduction = process.env.NODE_ENV === "production";
   const publicMessage = status >= 500 && isProduction ? "Error interno del servidor" : message;
 
-  logger.error("Error capturado por middleware global", {
+  // Los errores del cliente (4xx: 404 ruta inexistente, 401 token, 409 duplicado,
+  // 400 validacion) son normales -> se registran como WARN y sin stack trace.
+  // Solo los errores reales del servidor (5xx) se registran como ERROR con stack.
+  const isServerError = status >= 500;
+  const logFn = isServerError ? logger.error : logger.warn;
+  logFn("Solicitud con error", {
     status,
     message: err.message,
     code: err.code,
     sqlMessage: err.sqlMessage,
     method: req.method,
     url: req.originalUrl,
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    stack: isServerError && process.env.NODE_ENV === "development" ? err.stack : undefined
   });
 
   res.status(status).json({

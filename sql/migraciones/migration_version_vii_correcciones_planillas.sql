@@ -24,6 +24,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- ============================================================================
 DELIMITER $$
 
+-- NOTA: helpers silenciosos (sin SELECT) para compatibilidad con phpMyAdmin.
+
 DROP PROCEDURE IF EXISTS _v7_add_column $$
 CREATE PROCEDURE _v7_add_column(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ddl TEXT)
 BEGIN
@@ -31,28 +33,20 @@ BEGIN
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column) THEN
     SET @s = CONCAT('ALTER TABLE `', p_table, '` ADD COLUMN ', p_ddl);
     PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-    SELECT CONCAT('[OK] columna agregada: ', p_table, '.', p_column) AS resultado;
-  ELSE
-    SELECT CONCAT('[SKIP] ya existe: ', p_table, '.', p_column) AS resultado;
   END IF;
 END $$
 
--- Crea índice único sólo si NO existe y NO hay duplicados según p_dup_sql
--- (un SELECT que devuelve el número de grupos duplicados).
+-- Crea índice único sólo si NO existe y NO hay duplicados (p_dup_count = nº de
+-- grupos duplicados). Si hay duplicados, no lo crea (se reporta en BLOQUE 2/3).
 DROP PROCEDURE IF EXISTS _v7_add_unique_if_clean $$
 CREATE PROCEDURE _v7_add_unique_if_clean(
   IN p_table VARCHAR(64), IN p_index VARCHAR(64), IN p_cols TEXT, IN p_dup_count INT)
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.STATISTICS
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index) THEN
-    SELECT CONCAT('[SKIP] índice único ya existe: ', p_index) AS resultado;
-  ELSEIF p_dup_count > 0 THEN
-    SELECT CONCAT('[OMITIDO] ', p_index, ': existen ', p_dup_count,
-                  ' grupo(s) duplicado(s). Limpie y reejecute.') AS resultado;
-  ELSE
+  IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index)
+     AND p_dup_count = 0 THEN
     SET @s = CONCAT('CREATE UNIQUE INDEX `', p_index, '` ON `', p_table, '` (', p_cols, ')');
     PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-    SELECT CONCAT('[OK] índice único creado: ', p_index) AS resultado;
   END IF;
 END $$
 

@@ -39,6 +39,10 @@
 -- ============================================================================
 DELIMITER $$
 
+-- NOTA: los helpers NO emiten SELECT (result sets) para ser compatibles con
+-- phpMyAdmin (la pestaña SQL falla con #2014 "Commands out of sync" si un CALL
+-- devuelve resultados). Trabajan en silencio; al final se verifica el estado.
+
 DROP PROCEDURE IF EXISTS _rpj_add_column $$
 CREATE PROCEDURE _rpj_add_column(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ddl TEXT)
 BEGIN
@@ -46,9 +50,6 @@ BEGIN
                  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=p_table AND COLUMN_NAME=p_column) THEN
     SET @ddl = CONCAT('ALTER TABLE `', p_table, '` ADD COLUMN ', p_ddl);
     PREPARE _st FROM @ddl; EXECUTE _st; DEALLOCATE PREPARE _st;
-    SELECT CONCAT('[OK] columna agregada: ', p_table, '.', p_column) AS resultado;
-  ELSE
-    SELECT CONCAT('[SKIP] columna ya existe: ', p_table, '.', p_column) AS resultado;
   END IF;
 END $$
 
@@ -59,36 +60,25 @@ BEGIN
                  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=p_table AND INDEX_NAME=p_index) THEN
     SET @ddl = CONCAT('CREATE INDEX `', p_index, '` ON `', p_table, '` (', p_cols, ')');
     PREPARE _st FROM @ddl; EXECUTE _st; DEALLOCATE PREPARE _st;
-    SELECT CONCAT('[OK] índice creado: ', p_index, ' en ', p_table) AS resultado;
-  ELSE
-    SELECT CONCAT('[SKIP] índice ya existe: ', p_index) AS resultado;
   END IF;
 END $$
 
--- Agrega FK sólo si no existe (por nombre). No aborta si los datos están
--- sucios: captura el error y lo reporta para corrección manual.
+-- Agrega FK sólo si no existe. No aborta si los datos están sucios: el handler
+-- traga el error en silencio (el FK simplemente no se crea; se revisa al final).
 DROP PROCEDURE IF EXISTS _rpj_add_fk $$
 CREATE PROCEDURE _rpj_add_fk(IN p_table VARCHAR(64), IN p_fk VARCHAR(64), IN p_ddl TEXT)
 BEGIN
-  DECLARE v_msg TEXT;
-  DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
-  BEGIN
-    GET DIAGNOSTICS CONDITION 1 v_msg = MESSAGE_TEXT;
-    SELECT CONCAT('[FK OMITIDO] ', p_fk, ' -> revisar datos: ', v_msg) AS resultado;
-  END;
+  DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET @_rpj_fk_skipped = 1;
   IF NOT EXISTS (SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
                  WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME=p_table
                    AND CONSTRAINT_NAME=p_fk AND CONSTRAINT_TYPE='FOREIGN KEY') THEN
     SET @ddl = CONCAT('ALTER TABLE `', p_table, '` ADD CONSTRAINT `', p_fk, '` ', p_ddl);
     PREPARE _st FROM @ddl; EXECUTE _st; DEALLOCATE PREPARE _st;
-    SELECT CONCAT('[OK] FK creado: ', p_fk) AS resultado;
-  ELSE
-    SELECT CONCAT('[SKIP] FK ya existe: ', p_fk) AS resultado;
   END IF;
 END $$
 
 -- Elimina el FK de (tabla.columna) que apunta a p_ref_table, sin importar su
--- nombre auto-generado (ibfk_N varía entre entornos). Idempotente.
+-- nombre auto-generado (ibfk_N varía entre entornos). Idempotente, silencioso.
 DROP PROCEDURE IF EXISTS _rpj_drop_fk_by_ref $$
 CREATE PROCEDURE _rpj_drop_fk_by_ref(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ref_table VARCHAR(64))
 BEGIN
@@ -101,9 +91,6 @@ BEGIN
   IF v_fk IS NOT NULL THEN
     SET @ddl = CONCAT('ALTER TABLE `', p_table, '` DROP FOREIGN KEY `', v_fk, '`');
     PREPARE _st FROM @ddl; EXECUTE _st; DEALLOCATE PREPARE _st;
-    SELECT CONCAT('[OK] FK incorrecto eliminado: ', v_fk, ' (', p_table, '.', p_column, ' -> ', p_ref_table, ')') AS resultado;
-  ELSE
-    SELECT CONCAT('[SKIP] no hay FK ', p_table, '.', p_column, ' -> ', p_ref_table) AS resultado;
   END IF;
 END $$
 
