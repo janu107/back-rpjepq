@@ -13,6 +13,9 @@ INSERT INTO RPJ_MNT_EMPLEADO (
   emp_sexo,
   emp_tipo_puesto,
   emp_id_puesto,
+  emp_estado,
   emp_usuario_creacion
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+-- CAMBIO X: emp_estado se fija en 'ACTIVO' al crear (antes quedaba NULL y el
+-- empleado no aparecía como apto para generar nómina).
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?);

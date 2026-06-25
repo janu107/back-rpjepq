@@ -72,6 +72,20 @@ const reversarJubilado = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const getMontos = async (req, res, next) => {
+  try {
+    const data = await service.getMontos(req.params.id, req.params.jid);
+    return successResponse(res, data, "Montos obtenidos correctamente");
+  } catch (e) { next(e); }
+};
+
+const editarMontos = async (req, res, next) => {
+  try {
+    const data = await service.editarMontos(req.params.id, req.params.jid, req.body, req.user);
+    return successResponse(res, data, "MONTOS ACTUALIZADOS CORRECTAMENTE");
+  } catch (e) { next(e); }
+};
+
 const estadoCuenta = async (req, res, next) => {
   try {
     const data = await service.estadoCuenta(req.params.id);
@@ -107,6 +121,6 @@ const exportBanco = async (req, res, next) => {
 
 module.exports = {
   list, getById, create, update, preview, generar, getDetalle,
-  cerrar, reversar, reversarJubilado, estadoCuenta,
+  cerrar, reversar, reversarJubilado, getMontos, editarMontos, estadoCuenta,
   generarDeudaHistoricaMasivo, exportExcel, exportBanco
 };

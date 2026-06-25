@@ -29,6 +29,10 @@ router.post("/:id/cerrar",  ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "CERRA
 router.post("/:id/reversar", ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "REVERSAR", (req) => `Reversar planilla ${req.params.id}`), controller.reversar);
 router.post("/:id/jubilados/:jid/reversar", ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "REVERSAR_JUBILADO", (req) => `Reversar jubilado ${req.params.jid} planilla ${req.params.id}`), controller.reversarJubilado);
 
+// Edición de montos (CAMBIO X) — sólo si la planilla no está cerrada
+router.get("/:id/jubilados/:jid/montos", ADMIN_OP, controller.getMontos);
+router.put("/:id/jubilados/:jid/montos", ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "EDITAR_MONTOS", (req) => `Editar montos jubilado ${req.params.jid} planilla ${req.params.id}`), controller.editarMontos);
+
 // Base por :id (al final para no capturar sub-rutas)
 router.get("/:id",  ADMIN_OP, controller.getById);
 router.put("/:id",  ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "EDITAR", (req) => `Editar planilla ${req.params.id}`), controller.update);

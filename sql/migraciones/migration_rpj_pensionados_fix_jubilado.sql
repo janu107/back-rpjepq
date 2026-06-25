@@ -104,9 +104,11 @@ BEGIN
             SET MESSAGE_TEXT = 'Planilla no encontrada';
     END IF;
 
-    IF v_estado_proc != 'ABIERTA' THEN
+    -- CAMBIO X: se permite generar desde ABIERTA o desde REVERSADA (volver a
+    -- generar). Cualquier otro estado (GENERADA / CERRADA) se rechaza.
+    IF v_estado_proc NOT IN ('ABIERTA', 'REVERSADA') THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se puede generar nomina si la planilla esta ABIERTA';
+            SET MESSAGE_TEXT = 'Solo se puede generar nomina si la planilla esta ABIERTA o REVERSADA';
     END IF;
 
     -- 2. Dias calendario del periodo (ej. junio = 30)
@@ -123,6 +125,30 @@ BEGIN
      ORDER BY par_id DESC LIMIT 1;
 
     START TRANSACTION;
+
+    -- CAMBIO X: limpieza defensiva anti-duplicados. Si se está volviendo a
+    -- generar (estado REVERSADA) o quedaron renglones huérfanos, se eliminan
+    -- los registros previos de esta planilla (tipo_manejo = 2) antes de insertar.
+    -- Primero se restauran las deudas históricas ligadas a aplicaciones previas
+    -- (para no dejar deudas "pagadas" huérfanas), luego se borran las aplicaciones.
+    UPDATE RPJ_PRC_DEUDA_JUBILADO d
+     INNER JOIN RPJ_PRC_APLICACION_PAGO a
+             ON a.apa_id_deuda = d.deu_correlativo
+       SET d.deu_monto_pagado    = d.deu_monto_pagado    - a.apa_monto_aplicado,
+           d.deu_monto_pendiente = d.deu_monto_pendiente + a.apa_monto_aplicado,
+           d.deu_estado = CASE
+                            WHEN d.deu_monto_pagado - a.apa_monto_aplicado <= 0
+                            THEN 'PENDIENTE' ELSE 'PARCIAL'
+                          END,
+           d.deu_fecha_saldada = NULL
+     WHERE a.apa_id_planilla = p_id_planilla;
+
+    DELETE FROM RPJ_PRC_APLICACION_PAGO
+     WHERE apa_id_planilla = p_id_planilla;
+    DELETE FROM RPJ_PRC_NOMINA_DESCUENTO
+     WHERE nde_id_planilla = p_id_planilla AND nde_tipo_manejo = 2;
+    DELETE FROM RPJ_PRC_NOMINA_INGRESO
+     WHERE nin_id_planilla = p_id_planilla AND nin_tipo_manejo = 2;
 
     -- 4. Recorrer jubilados
     OPEN cur_jub;
@@ -508,9 +534,10 @@ BEGIN
       FROM RPJ_CAT_PARAMETRO_PLANILLA
      WHERE ppl_correlativo = p_id_planilla;
 
-    IF v_estado NOT IN ('GENERADA','CERRADA') THEN
+    -- CAMBIO X: sólo se reversa una planilla GENERADA. CERRADA queda bloqueada.
+    IF v_estado != 'GENERADA' THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se pueden reversar pagos en planillas GENERADAS o CERRADAS';
+            SET MESSAGE_TEXT = 'Solo se pueden reversar pagos en planillas GENERADAS';
     END IF;
 
     START TRANSACTION;
@@ -601,9 +628,10 @@ BEGIN
             SET MESSAGE_TEXT = 'Planilla no encontrada';
     END IF;
 
-    IF v_estado NOT IN ('GENERADA','CERRADA') THEN
+    -- CAMBIO X: sólo se reversa una planilla GENERADA. CERRADA queda bloqueada.
+    IF v_estado != 'GENERADA' THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se pueden reversar planillas GENERADAS o CERRADAS';
+            SET MESSAGE_TEXT = 'Solo se pueden reversar planillas GENERADAS';
     END IF;
 
     START TRANSACTION;

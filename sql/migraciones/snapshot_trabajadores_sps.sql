@@ -61,6 +61,8 @@ BEGIN
     DECLARE v_id_tipo_judic     INT;
 
     -- Cursor principal: empleados activos tipo_manejo = 1
+    -- CAMBIO X: emp_estado puede venir NULL (la app no lo setea al crear). Se
+    -- considera ACTIVO todo empleado cuyo estado NO sea explícitamente INACTIVO.
     DECLARE cur_empleados CURSOR FOR
         SELECT e.emp_correlativo,
                e.emp_tipo_manejo,
@@ -68,7 +70,7 @@ BEGIN
                e.emp_fecha_ingreso
           FROM RPJ_MNT_EMPLEADO e
          WHERE e.emp_tipo_manejo = 1
-           AND e.emp_estado      = 'ACTIVO';
+           AND UPPER(COALESCE(e.emp_estado, 'ACTIVO')) <> 'INACTIVO';
 
     -- Cursor secundario: ingresos del empleado (ordenado por correlativo ASC
     --   para que el primer registro sea el salario base)
@@ -110,9 +112,11 @@ BEGIN
             SET MESSAGE_TEXT = 'Planilla no encontrada';
     END IF;
 
-    IF v_estado_proc != 'ABIERTA' THEN
+    -- CAMBIO X: se permite generar desde ABIERTA o desde REVERSADA (volver a
+    -- generar). Cualquier otro estado (GENERADA / CERRADA) se rechaza.
+    IF v_estado_proc NOT IN ('ABIERTA', 'REVERSADA') THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se puede generar nomina si la planilla esta ABIERTA';
+            SET MESSAGE_TEXT = 'Solo se puede generar nomina si la planilla esta ABIERTA o REVERSADA';
     END IF;
 
     -- 2. Dias calendario del periodo (ej. junio = 30)
@@ -142,6 +146,14 @@ BEGIN
      WHERE UPPER(tde_tipo_descuento) IN ('JUDICIAL','JUDICIALES') LIMIT 1;
 
     START TRANSACTION;
+
+    -- CAMBIO X: limpieza defensiva anti-duplicados. Si se está volviendo a
+    -- generar (estado REVERSADA) o quedaron renglones huérfanos, se eliminan
+    -- los registros previos de esta planilla (tipo_manejo = 1) antes de insertar.
+    DELETE FROM RPJ_PRC_NOMINA_DESCUENTO
+     WHERE nde_id_planilla = p_id_planilla AND nde_tipo_manejo = 1;
+    DELETE FROM RPJ_PRC_NOMINA_INGRESO
+     WHERE nin_id_planilla = p_id_planilla AND nin_tipo_manejo = 1;
 
     -- 5. Recorrer empleados
     -- Reset del flag NOT FOUND por si algun SELECT INTO previo (lookups de
@@ -416,9 +428,10 @@ BEGIN
       FROM RPJ_CAT_PARAMETRO_PLANILLA
      WHERE ppl_correlativo = p_id_planilla;
 
-    IF v_estado NOT IN ('GENERADA','CERRADA') THEN
+    -- CAMBIO X: sólo se reversa una planilla GENERADA. CERRADA queda bloqueada.
+    IF v_estado != 'GENERADA' THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se pueden reversar pagos en planillas GENERADAS o CERRADAS';
+            SET MESSAGE_TEXT = 'Solo se pueden reversar pagos en planillas GENERADAS';
     END IF;
 
     START TRANSACTION;
@@ -502,9 +515,10 @@ BEGIN
             SET MESSAGE_TEXT = 'Planilla no encontrada';
     END IF;
 
-    IF v_estado NOT IN ('GENERADA','CERRADA') THEN
+    -- CAMBIO X: sólo se reversa una planilla GENERADA. CERRADA queda bloqueada.
+    IF v_estado != 'GENERADA' THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Solo se pueden reversar planillas GENERADAS o CERRADAS';
+            SET MESSAGE_TEXT = 'Solo se pueden reversar planillas GENERADAS';
     END IF;
 
     START TRANSACTION;

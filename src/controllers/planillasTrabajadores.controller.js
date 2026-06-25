@@ -71,6 +71,20 @@ const reversarEmpleado = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const getMontos = async (req, res, next) => {
+  try {
+    const data = await service.getMontos(req.params.id, req.params.eid);
+    return successResponse(res, data, "Montos obtenidos correctamente");
+  } catch (e) { next(e); }
+};
+
+const editarMontos = async (req, res, next) => {
+  try {
+    const data = await service.editarMontos(req.params.id, req.params.eid, req.body, req.user);
+    return successResponse(res, data, "MONTOS ACTUALIZADOS CORRECTAMENTE");
+  } catch (e) { next(e); }
+};
+
 const exportExcel = async (req, res, next) => {
   try {
     const { buffer, filename } = await service.exportExcel(req.params.id);
@@ -91,5 +105,6 @@ const exportBanco = async (req, res, next) => {
 
 module.exports = {
   list, getById, create, update, preview, generar, getDetalle,
-  cerrar, reversar, reversarEmpleado, exportExcel, exportBanco
+  cerrar, reversar, reversarEmpleado, getMontos, editarMontos,
+  exportExcel, exportBanco
 };

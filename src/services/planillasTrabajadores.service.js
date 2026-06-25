@@ -2,16 +2,11 @@ const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const ExcelJS = require("exceljs");
+const { assertCan, createError } = require("../utils/planillaEstado");
 
 const TIPO_PLANILLA_EMPLEADOS = 1;
 
 const sql = (file) => getSql(`planillas-trabajadores/${file}.sql`);
-
-const createError = (message, status = 400) => {
-  const error = new Error(message);
-  error.status = status;
-  return error;
-};
 
 const toNum = (v) => Number(v || 0);
 
@@ -108,18 +103,52 @@ const update = async (id, payload, currentUser) => {
   return getById(id);
 };
 
+// Motivo de exclusión de un empleado (null = apto). Un empleado es apto si
+// tiene datos de planilla y aplica a nómina (el SP procesa así).
+const motivoExclusionEmpleado = (e) => {
+  if (!e.tiene_datos) return "SIN DATOS DE PLANILLA";
+  if (!e.aplica_nomina) return "NO APLICA A NÓMINA";
+  if (!e.tiene_salario) return "SIN SALARIO CONFIGURADO (GENERARÍA Q0.00)";
+  return null;
+};
+
+const mapEmpleadoPreview = (e) => {
+  const motivo = motivoExclusionEmpleado(e);
+  // "Apto" para el conteo se alinea con el SP: datos + aplica nómina.
+  const apto = Boolean(e.tiene_datos) && Boolean(e.aplica_nomina);
+  return {
+    idEmpleado: e.id_empleado,
+    dpi: e.dpi,
+    nombreCompleto: e.nombre_completo,
+    puesto: e.puesto,
+    fechaIngreso: e.fecha_ingreso,
+    tieneDatos: Boolean(e.tiene_datos),
+    aplicaNomina: Boolean(e.aplica_nomina),
+    tieneSalario: Boolean(e.tiene_salario),
+    salarioBase: toNum(e.salario_base),
+    apto,
+    motivo: apto ? null : motivo
+  };
+};
+
 const preview = async (id) => {
   const [rows] = await pool.execute(sql("preview"), [id]);
   if (!rows[0]) throw createError("Planilla no encontrada", 404);
   const row = rows[0];
-  const totalActivos = toNum(row.total_activos);
-  const conDatos = toNum(row.con_datos_planilla);
+  const [empleados] = await pool.execute(sql("previewEmpleados"));
+  const lista = empleados.map(mapEmpleadoPreview);
+  const aptos = lista.filter((e) => e.apto);
+  const excluidosLista = lista.filter((e) => !e.apto);
+  const conSalario = lista.filter((e) => e.tieneSalario).length;
   return {
-    totalActivos,
-    conDatosPlanilla: conDatos,
-    excluidos: totalActivos - conDatos,
+    totalActivos: lista.length,
+    conDatosPlanilla: aptos.length,
+    conSalario,
+    excluidos: excluidosLista.length,
     porcentajePago: toNum(row.porcentaje_pago),
-    estadoProceso: row.estado_proceso
+    estadoProceso: row.estado_proceso,
+    empleadosAptos: aptos,
+    empleadosExcluidos: excluidosLista
   };
 };
 
@@ -140,7 +169,8 @@ const callSp = async (spCall, inParams, outNames) => {
 
 const generar = async (id, currentUser) => {
   const planilla = await getById(id);
-  if (planilla.estadoProceso !== "ABIERTA") throw createError("PLANILLA NO EN ESTADO ABIERTA. No se puede generar la nomina.");
+  // CAMBIO X: se permite generar desde ABIERTA o REVERSADA (volver a generar).
+  assertCan("generar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Generando nomina trabajadores", { idPlanilla: id, usuario });
 
@@ -166,6 +196,8 @@ const getDetalle = async (id) => {
 };
 
 const cerrar = async (id, currentUser) => {
+  const planilla = await getById(id);
+  assertCan("cerrar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Cerrando planilla trabajadores", { idPlanilla: id, usuario });
   await callSp(`sp_cerrar_planilla(?, ?)`, [id, usuario], []);
@@ -174,6 +206,8 @@ const cerrar = async (id, currentUser) => {
 
 const reversar = async (id, motivo, currentUser) => {
   if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
+  const planilla = await getById(id);
+  assertCan("reversar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Reversando planilla trabajadores", { idPlanilla: id, usuario });
   await callSp(`sp_reversar_planilla_trabajadores(?, ?, ?)`, [id, usuario, motivo], []);
@@ -182,9 +216,59 @@ const reversar = async (id, motivo, currentUser) => {
 
 const reversarEmpleado = async (id, idEmpleado, motivo, currentUser) => {
   if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
+  const planilla = await getById(id);
+  assertCan("reversar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Reversando pago de empleado", { idPlanilla: id, idEmpleado, usuario });
   await callSp(`sp_reversar_pago_trabajador(?, ?, ?, ?)`, [id, idEmpleado, usuario, motivo], []);
+  return getDetalle(id);
+};
+
+// CAMBIO X: renglones de ingreso/descuento de un empleado para edición de montos.
+const getMontos = async (id, idEmpleado) => {
+  const [rows] = await pool.execute(sql("montosEmpleado"), [id, idEmpleado, id, idEmpleado]);
+  return rows.map((r) => ({
+    clase: r.clase,
+    id: r.id,
+    concepto: r.concepto,
+    valor: toNum(r.valor)
+  }));
+};
+
+// CAMBIO X: edición de montos. Sólo permitida si la planilla está GENERADA
+// (no cerrada). Actualiza cada renglón de ingreso/descuento recibido.
+const editarMontos = async (id, idEmpleado, payload, currentUser) => {
+  const planilla = await getById(id);
+  assertCan("editarMontos", planilla.estadoProceso);
+
+  const ingresos = Array.isArray(payload?.ingresos) ? payload.ingresos : [];
+  const descuentos = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
+  if (!ingresos.length && !descuentos.length) throw createError("No se recibieron montos para actualizar");
+
+  const valido = (v) => v !== undefined && v !== null && !Number.isNaN(Number(v)) && Number(v) >= 0;
+  for (const ing of ingresos) if (!valido(ing.valor)) throw createError("Los montos de ingreso deben ser números mayores o iguales a 0");
+  for (const des of descuentos) if (!valido(des.valor)) throw createError("Los montos de descuento deben ser números mayores o iguales a 0");
+
+  const usuario = currentUser?.usuario || "sistema";
+  logger.info("Editando montos empleado", { idPlanilla: id, idEmpleado, usuario });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const ing of ingresos) {
+      const valor = toNum(ing.valor);
+      await conn.execute(sql("actualizarMontoIngreso"), [valor, valor, ing.id, id, idEmpleado]);
+    }
+    for (const des of descuentos) {
+      await conn.execute(sql("actualizarMontoDescuento"), [toNum(des.valor), des.id, id, idEmpleado]);
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
   return getDetalle(id);
 };
 
@@ -239,5 +323,6 @@ const exportBanco = async (id) => {
 module.exports = {
   list, getById, create, update, preview,
   generar, getDetalle, cerrar, reversar, reversarEmpleado,
+  getMontos, editarMontos,
   exportExcel, exportBanco
 };

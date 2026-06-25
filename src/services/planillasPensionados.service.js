@@ -2,14 +2,12 @@ const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const ExcelJS = require("exceljs");
+const { assertCan, createError } = require("../utils/planillaEstado");
+
+// CAMBIO X: las planillas de pensionados son SIEMPRE tipo 2 (NÓMINA JUBILADOS).
+const TIPO_PLANILLA_PENSIONADOS = 2;
 
 const sql = (file) => getSql(`planillas-pensionados/${file}.sql`);
-
-const createError = (message, status = 400) => {
-  const error = new Error(message);
-  error.status = status;
-  return error;
-};
 
 const toNum = (v) => Number(v || 0);
 
@@ -59,7 +57,7 @@ const mapDetalle = (row) => ({
 });
 
 const validate = (data) => {
-  if (!data.tipoPlanilla) throw createError("El tipo de planilla es obligatorio");
+  // CAMBIO X: el tipo de planilla es fijo (NÓMINA JUBILADOS); no se exige del payload.
   if (!data.numero || String(data.numero).length !== 6) throw createError("El número de planilla debe tener formato YYYYMM");
   if (!data.fechaInicio) throw createError("La fecha de inicio es obligatoria");
   if (!data.fechaFinal) throw createError("La fecha final es obligatoria");
@@ -83,15 +81,18 @@ const getById = async (id) => {
 
 const create = async (payload, currentUser) => {
   validate(payload);
+  // CAMBIO X: el tipo de planilla se fuerza a NÓMINA JUBILADOS (2), sin importar
+  // lo que envíe el frontend.
+  const tipoPlanilla = TIPO_PLANILLA_PENSIONADOS;
   // Evitar planillas duplicadas por tipo + numero (Version VII)
   const [dup] = await pool.execute(
     "SELECT ppl_correlativo FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = ? AND ppl_numero = ?",
-    [payload.tipoPlanilla, payload.numero]
+    [tipoPlanilla, payload.numero]
   );
   if (dup.length) throw createError("YA EXISTE UNA PLANILLA DE PENSIONADOS CON ESE NUMERO", 409);
   const usuario = currentUser?.usuario || "sistema";
   const params = [
-    payload.tipoPlanilla, payload.numero,
+    tipoPlanilla, payload.numero,
     payload.fechaInicio, payload.fechaFinal, payload.fechaPago,
     toNum(payload.porcentajePago),
     usuario
@@ -113,18 +114,49 @@ const update = async (id, payload, currentUser) => {
   return getById(id);
 };
 
+// Motivo de exclusión de un jubilado (null = apto). El SP exige datos de
+// planilla, aplica a nómina y salario inicial (sal_tipo_ingreso = 1).
+const motivoExclusionJubilado = (j) => {
+  if (!j.tiene_datos) return "SIN DATOS DE PLANILLA";
+  if (!j.aplica_nomina) return "NO APLICA A NÓMINA";
+  if (!j.tiene_salario) return "SIN PENSIÓN (SALARIO) CONFIGURADA";
+  return null;
+};
+
+const mapJubiladoPreview = (j) => {
+  const motivo = motivoExclusionJubilado(j);
+  const apto = Boolean(j.tiene_datos) && Boolean(j.aplica_nomina) && Boolean(j.tiene_salario);
+  return {
+    idJubilado: j.id_jubilado,
+    dpi: j.dpi,
+    nombreCompleto: j.nombre_completo,
+    fechaJubilacion: j.fecha_jubilacion,
+    tieneDatos: Boolean(j.tiene_datos),
+    aplicaNomina: Boolean(j.aplica_nomina),
+    tieneSalario: Boolean(j.tiene_salario),
+    salarioBase: toNum(j.salario_base),
+    apto,
+    motivo: apto ? null : motivo
+  };
+};
+
 const preview = async (id) => {
   const [rows] = await pool.execute(sql("preview"), [id]);
   if (!rows[0]) throw createError("Planilla no encontrada", 404);
   const row = rows[0];
-  const totalActivos = toNum(row.total_activos);
-  const conDatos = toNum(row.con_datos_planilla);
+  const [jubilados] = await pool.execute(sql("previewJubilados"));
+  const lista = jubilados.map(mapJubiladoPreview);
+  const aptos = lista.filter((j) => j.apto);
+  const excluidosLista = lista.filter((j) => !j.apto);
   return {
-    totalActivos,
-    conDatosPlanilla: conDatos,
-    excluidos: totalActivos - conDatos,
+    totalActivos: lista.length,
+    conDatosPlanilla: aptos.length,
+    conSalario: lista.filter((j) => j.tieneSalario).length,
+    excluidos: excluidosLista.length,
     porcentajePago: toNum(row.porcentaje_pago),
-    estadoProceso: row.estado_proceso
+    estadoProceso: row.estado_proceso,
+    jubiladosAptos: aptos,
+    jubiladosExcluidos: excluidosLista
   };
 };
 
@@ -147,7 +179,8 @@ const callSp = async (spCall, inParams, outNames) => {
 
 const generar = async (id, tipoIngreso, currentUser) => {
   const planilla = await getById(id);
-  if (planilla.estadoProceso !== "ABIERTA") throw createError("PLANILLA NO EN ESTADO ABIERTA. No se puede generar la nomina.");
+  // CAMBIO X: se permite generar desde ABIERTA o REVERSADA (volver a generar).
+  assertCan("generar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Generando nomina pensionados", { idPlanilla: id, usuario });
 
@@ -173,6 +206,8 @@ const getDetalle = async (id) => {
 };
 
 const cerrar = async (id, currentUser) => {
+  const planilla = await getById(id);
+  assertCan("cerrar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Cerrando planilla pensionados", { idPlanilla: id, usuario });
   await callSp(`sp_cerrar_planilla(?, ?)`, [id, usuario], []);
@@ -181,6 +216,8 @@ const cerrar = async (id, currentUser) => {
 
 const reversar = async (id, motivo, currentUser) => {
   if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
+  const planilla = await getById(id);
+  assertCan("reversar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Reversando planilla pensionados", { idPlanilla: id, usuario });
   await callSp(`sp_reversar_planilla_pensionados(?, ?, ?)`, [id, usuario, motivo], []);
@@ -189,9 +226,58 @@ const reversar = async (id, motivo, currentUser) => {
 
 const reversarJubilado = async (id, idJubilado, motivo, currentUser) => {
   if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
+  const planilla = await getById(id);
+  assertCan("reversar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Reversando pago de jubilado", { idPlanilla: id, idJubilado, usuario });
   await callSp(`sp_reversar_pago_pensionado(?, ?, ?, ?)`, [id, idJubilado, usuario, motivo], []);
+  return getDetalle(id);
+};
+
+// CAMBIO X: renglones de ingreso/descuento de un jubilado para edición de montos.
+const getMontos = async (id, idJubilado) => {
+  const [rows] = await pool.execute(sql("montosJubilado"), [id, idJubilado, id, idJubilado]);
+  return rows.map((r) => ({
+    clase: r.clase,
+    id: r.id,
+    concepto: r.concepto,
+    valor: toNum(r.valor)
+  }));
+};
+
+// CAMBIO X: edición de montos. Sólo permitida si la planilla está GENERADA.
+const editarMontos = async (id, idJubilado, payload, currentUser) => {
+  const planilla = await getById(id);
+  assertCan("editarMontos", planilla.estadoProceso);
+
+  const ingresos = Array.isArray(payload?.ingresos) ? payload.ingresos : [];
+  const descuentos = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
+  if (!ingresos.length && !descuentos.length) throw createError("No se recibieron montos para actualizar");
+
+  const valido = (v) => v !== undefined && v !== null && !Number.isNaN(Number(v)) && Number(v) >= 0;
+  for (const ing of ingresos) if (!valido(ing.valor)) throw createError("Los montos de ingreso deben ser números mayores o iguales a 0");
+  for (const des of descuentos) if (!valido(des.valor)) throw createError("Los montos de descuento deben ser números mayores o iguales a 0");
+
+  const usuario = currentUser?.usuario || "sistema";
+  logger.info("Editando montos jubilado", { idPlanilla: id, idJubilado, usuario });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const ing of ingresos) {
+      const valor = toNum(ing.valor);
+      await conn.execute(sql("actualizarMontoIngreso"), [valor, valor, ing.id, id, idJubilado]);
+    }
+    for (const des of descuentos) {
+      await conn.execute(sql("actualizarMontoDescuento"), [toNum(des.valor), des.id, id, idJubilado]);
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
   return getDetalle(id);
 };
 
@@ -300,5 +386,6 @@ const exportBanco = async (id) => {
 module.exports = {
   list, getById, create, update, preview,
   generar, getDetalle, cerrar, reversar, reversarJubilado,
+  getMontos, editarMontos,
   estadoCuenta, generarDeudaHistoricaMasivo, exportExcel, exportBanco
 };
