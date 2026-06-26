@@ -4,6 +4,8 @@ const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
 const TIPOS_HORA = ["DIURNA", "NOCTURNA", "MIXTA", "FERIADO"];
+const ESTADOS_DIETA = ["PENDIENTE", "PAGADO", "RECIBIDO", "ANULADO"];
+const TIPOS_DOCUMENTO_DIETA = ["CHEQUE", "TRANSFERENCIA", "DEPOSITO"];
 
 const configs = {
   salarios: {
@@ -51,35 +53,63 @@ const configs = {
   },
   dietas: {
     dir: "dietas",
-    required: ["idJuntaDirectiva", "fechaSesion", "fechaPago", "sesionesMes", "acta", "valor", "retencionIsr", "liquido", "total"],
-    upperFields: ["acta"],
-    // Version IV: el backend calcula valor/retencion/liquido/total desde los parametros
-    // generales. El usuario solo envia miembro, fechas, sesiones y acta.
+    // Modelo vdi_* (encabezado de pago mensual por miembro). El usuario envia
+    // miembro, total de sesiones y los datos de pago; el backend calcula montos.
+    required: ["idJuntaDirectiva", "totalSesiones"],
+    upperFields: ["banco", "observaciones", "tipoDocumento", "estado"],
     prepare: async (data) => {
       const { pagoDieta, isr } = await getParametrosDieta();
-      return { ...data, ...computeDieta(pagoDieta, isr, data.sesionesMes) };
+      return { ...data, ...computeDietaVdi(pagoDieta, isr, data.totalSesiones) };
     },
     validate: (data) => {
-      validateDate(data.fechaSesion, "Fecha sesion");
-      validateDate(data.fechaPago, "Fecha pago");
-      ["sesionesMes", "valor", "retencionIsr", "liquido", "total"].forEach((field) => validateAmount(data[field], field));
+      validateAmount(data.totalSesiones, "Total de sesiones");
+      const estado = String(data.estado || "PENDIENTE").toUpperCase();
+      if (!ESTADOS_DIETA.includes(estado)) throw createError("Estado de dieta no valido");
+      if (data.tipoDocumento && !TIPOS_DOCUMENTO_DIETA.includes(String(data.tipoDocumento).toUpperCase())) {
+        throw createError("Tipo de documento no valido");
+      }
+      if (data.fechaPago) validateDate(data.fechaPago, "Fecha de pago");
+      if (data.fechaRecibido) validateDate(data.fechaRecibido, "Fecha de recibido");
+      // Reglas de negocio (spec): condiciones para PAGADO / RECIBIDO.
+      if (estado === "PAGADO" && (!data.noDocumento || !data.tipoDocumento || !data.banco || !data.fechaPago)) {
+        throw createError("Para marcar PAGADO se requiere No. documento, tipo, banco y fecha de pago");
+      }
+      if (estado === "RECIBIDO" && !data.fechaRecibido) {
+        throw createError("Para marcar RECIBIDO se requiere la fecha de recibido");
+      }
     },
-    toDb: (data) => [data.idJuntaDirectiva, data.fechaSesion, data.fechaPago, data.sesionesMes, data.acta, data.valor, data.retencionIsr, data.liquido, data.total],
+    toDb: (data) => [
+      data.idJuntaDirectiva,
+      Number(data.totalSesiones) || 0,
+      data.valor,
+      data.isr,
+      data.valorPago,
+      data.noDocumento || null,
+      data.tipoDocumento || null,
+      data.banco || null,
+      data.fechaPago || null,
+      data.fechaRecibido || null,
+      (String(data.estado || "PENDIENTE").toUpperCase()),
+      data.observaciones || null
+    ],
     toResponse: (row) => ({
-      id: row.die_correlativo,
-      idJuntaDirectiva: row.die_id_junta_directiva,
-      fechaSesion: row.die_fecha_sesion,
-      fechaPago: row.die_fecha_pago,
-      sesionesMes: row.die_sesiones_mes,
-      acta: row.die_acta,
-      valor: Number(row.die_valor),
-      retencionIsr: Number(row.die_retencion_isr),
-      liquido: Number(row.die_liquido),
-      total: Number(row.die_total),
+      id: row.vdi_correlativo,
+      idJuntaDirectiva: row.vdi_id_junta_directiva,
+      totalSesiones: row.vdi_total_sesiones,
+      valor: Number(row.vdi_valor),
+      isr: Number(row.vdi_isr),
+      valorPago: Number(row.vdi_valor_pago),
+      noDocumento: row.vdi_no_documento,
+      tipoDocumento: row.vdi_tipo_documento,
+      banco: row.vdi_banco,
+      fechaPago: row.vdi_fecha_pago,
+      fechaRecibido: row.vdi_fecha_recibido,
+      estado: row.vdi_estado,
+      observaciones: row.vdi_observaciones,
       juntaNombre: `${row.jun_nombre || ""} ${row.jun_apellidos || ""}`.trim(),
       juntaPuesto: row.jun_puesto,
-      fechaCreacion: row.die_fecha_creacion,
-      usuarioCreacion: row.die_usuario_creacion
+      fechaCreacion: row.vdi_fecha_creacion,
+      usuarioCreacion: row.vdi_usuario_creacion
     })
   },
   "otros-descuentos": {
@@ -139,13 +169,14 @@ const getParametrosDieta = async () => {
   return { pagoDieta: Number(rows[0].par_pago_dieta || 0), isr: Number(rows[0].par_isr || 0) };
 };
 
-const computeDieta = (pagoDieta, isr, sesionesMes) => {
-  const sesiones = Number(sesionesMes) > 0 ? Number(sesionesMes) : 1;
+// Modelo vdi_*: VALOR = par_pago_dieta * total_sesiones; ISR = VALOR * par_isr/100;
+// VALOR_PAGO (liquido) = VALOR - ISR. No se hardcodean montos (vienen de parametros).
+const computeDietaVdi = (pagoDieta, isr, totalSesiones) => {
+  const sesiones = Number(totalSesiones) >= 0 ? Number(totalSesiones) : 0;
   const valor = Number((pagoDieta * sesiones).toFixed(2));
-  const retencionIsr = Number((valor * isr / 100).toFixed(2));
-  const liquido = Number((valor - retencionIsr).toFixed(2));
-  // die_total es NOT NULL en la BD pero ya no se muestra al usuario: se guarda = liquido.
-  return { valor, retencionIsr, liquido, total: liquido };
+  const isrMonto = Number((valor * isr / 100).toFixed(2));
+  const valorPago = Number((valor - isrMonto).toFixed(2));
+  return { valor, isr: isrMonto, valorPago };
 };
 
 const getQuery = (config, file) => getSql(`${config.dir}/${file}.sql`);

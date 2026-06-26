@@ -28,11 +28,13 @@ const configs = {
     idColumn: "emp_correlativo",
     idMessage: "EL ID DE EMPLEADO YA EXISTE. INGRESE UN ID DIFERENTE.",
     // Campos de texto que deben guardarse en MAYUSCULAS
-    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "tipoPuesto"],
+    upperFields: ["nombres", "apellidos", "direccion", "profesionOficio", "estadoCivil", "sexo", "tipoPuesto", "estado"],
     validate: (data) => {
       validateOption(data.estadoCivil, ESTADOS_CIVILES, "Estado civil no permitido");
       validateOption(data.sexo, SEXOS, "Sexo no permitido.");
       validateOption(data.tipoPuesto, TIPOS_PUESTO, "Tipo puesto no permitido");
+      // estado es opcional: por defecto ACTIVO. Si viene, debe ser ACTIVO/INACTIVO.
+      validateOption(data.estado || "ACTIVO", ESTADOS, "Estado no permitido");
       validateDate(data.fechaNacimiento, "Fecha de nacimiento invalida");
       if (data.fechaIngreso) validateDate(data.fechaIngreso, "Fecha de ingreso invalida");
     },
@@ -50,7 +52,8 @@ const configs = {
       data.fechaIngreso || null,
       data.sexo,
       data.tipoPuesto,
-      data.idPuesto
+      data.idPuesto,
+      (data.estado || "ACTIVO")
     ],
     toResponse: (row) => ({
       id: row.emp_correlativo,
@@ -68,6 +71,7 @@ const configs = {
       sexo: row.emp_sexo,
       tipoPuesto: row.emp_tipo_puesto,
       idPuesto: row.emp_id_puesto,
+      estado: row.emp_estado || "ACTIVO",
       manejoDescripcion: row.manejo_descripcion,
       puestoNombre: row.puesto_nombre,
       areaDescripcion: row.area_descripcion,

@@ -13,5 +13,6 @@ SET
   emp_fecha_ingreso = ?,
   emp_sexo = ?,
   emp_tipo_puesto = ?,
-  emp_id_puesto = ?
+  emp_id_puesto = ?,
+  emp_estado = ?
 WHERE emp_correlativo = ?;

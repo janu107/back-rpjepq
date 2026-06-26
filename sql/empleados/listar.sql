@@ -14,6 +14,7 @@ SELECT
   e.emp_sexo,
   e.emp_tipo_puesto,
   e.emp_id_puesto,
+  e.emp_estado,
   e.emp_fecha_creacion,
   e.emp_usuario_creacion,
   m.man_descripcion AS manejo_descripcion,

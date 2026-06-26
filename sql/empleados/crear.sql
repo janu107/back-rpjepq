@@ -16,6 +16,6 @@ INSERT INTO RPJ_MNT_EMPLEADO (
   emp_estado,
   emp_usuario_creacion
 )
--- CAMBIO X: emp_estado se fija en 'ACTIVO' al crear (antes quedaba NULL y el
--- empleado no aparecía como apto para generar nómina).
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?);
+-- emp_estado lo envía el servicio (default ACTIVO). Antes quedaba NULL y el
+-- empleado no aparecía como apto para generar nómina (fix CAMBIO X).
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

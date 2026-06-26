@@ -1,12 +1,16 @@
+-- Pago de Dietas (modelo vdi_*): actualizar encabezado de pago.
 UPDATE RPJ_MNT_DIETA
 SET
-  die_id_junta_directiva = ?,
-  die_fecha_sesion = ?,
-  die_fecha_pago = ?,
-  die_sesiones_mes = ?,
-  die_acta = ?,
-  die_valor = ?,
-  die_retencion_isr = ?,
-  die_liquido = ?,
-  die_total = ?
-WHERE die_correlativo = ?;
+  vdi_id_junta_directiva = ?,
+  vdi_total_sesiones = ?,
+  vdi_valor = ?,
+  vdi_isr = ?,
+  vdi_valor_pago = ?,
+  vdi_no_documento = ?,
+  vdi_tipo_documento = ?,
+  vdi_banco = ?,
+  vdi_fecha_pago = ?,
+  vdi_fecha_recibido = ?,
+  vdi_estado = ?,
+  vdi_observaciones = ?
+WHERE vdi_correlativo = ?;
