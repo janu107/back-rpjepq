@@ -6,6 +6,7 @@ SELECT
   t.tex_cantidad_horas,
   t.tex_motivo,
   t.tex_tipo_hora,
+  t.tex_fecha_pago,
   t.tex_fecha_creacion,
   t.tex_usuario_creacion,
   e.emp_id,

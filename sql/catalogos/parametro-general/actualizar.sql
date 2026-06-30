@@ -12,5 +12,6 @@ SET
   par_igss = ?,
   par_igss_patronal = ?,
   par_intecap = ?,
-  par_desc_asociacion = ?
+  par_desc_asociacion = ?,
+  par_porcentaje_tiemext_doble = ?
 WHERE par_id = ?;

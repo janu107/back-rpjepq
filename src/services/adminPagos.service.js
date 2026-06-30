@@ -29,27 +29,41 @@ const configs = {
   },
   "tiempo-extra": {
     dir: "tiempo-extra",
-    required: ["idEmpleado", "fecha", "cantidadHoras", "motivo"],
+    // FECHA PAGO determina el periodo; inicio/final = primer/último día del mes.
+    // tex_tipo_hora: 1=NORMAL, 2=DOBLE.
+    required: ["idEmpleado", "fechaPago", "tipoHora", "cantidadHoras"],
     upperFields: ["motivo"],
     validate: (data) => {
-      validateDate(data.fecha, "Fecha");
+      validateDate(data.fechaPago, "Fecha de pago");
+      if (![1, 2].includes(Number(data.tipoHora))) throw createError("Tipo de hora no válido (1=NORMAL, 2=DOBLE)");
       if (Number(data.cantidadHoras) <= 0) throw createError("Cantidad de horas debe ser mayor a 0");
       if (Number(data.cantidadHoras) > 744) throw createError("Cantidad de horas fuera de rango");
     },
-    normalize: (data) => ({ ...data }),
-    toDb: (data) => [data.idEmpleado, `${data.fecha} 00:00:00`, `${data.fecha} 23:59:59`, data.cantidadHoras, data.motivo],
-    toResponse: (row) => ({
-      id: row.tex_correlativo,
-      idEmpleado: row.tex_id_empleado,
-      fecha: String(row.tex_fecha_hora_inicio).slice(0, 10),
-      cantidadHoras: Number(row.tex_cantidad_horas),
-      motivo: row.tex_motivo,
-      empleadoNombre: `${row.emp_nombres || ""} ${row.emp_apellidos || ""}`.trim(),
-      empleadoCodigo: row.emp_id,
-      empleadoDpi: row.emp_dpi,
-      fechaCreacion: row.tex_fecha_creacion,
-      usuarioCreacion: row.tex_usuario_creacion
-    })
+    toDb: (data) => {
+      const { inicio, final } = mesDesdeFechaPago(data.fechaPago);
+      return [data.idEmpleado, inicio, final, data.cantidadHoras, data.motivo || null, Number(data.tipoHora), data.fechaPago];
+    },
+    toResponse: (row) => {
+      const tipo = Number(row.tex_tipo_hora);
+      return {
+        id: row.tex_correlativo,
+        idEmpleado: row.tex_id_empleado,
+        fechaPago: row.tex_fecha_pago
+          ? String(row.tex_fecha_pago).slice(0, 10)
+          : (row.tex_fecha_hora_inicio ? String(row.tex_fecha_hora_inicio).slice(0, 10) : null),
+        fechaInicio: row.tex_fecha_hora_inicio ? String(row.tex_fecha_hora_inicio).slice(0, 10) : null,
+        fechaFinal: row.tex_fecha_hora_final ? String(row.tex_fecha_hora_final).slice(0, 10) : null,
+        tipoHora: [1, 2].includes(tipo) ? tipo : null,
+        tipoHoraNombre: tipo === 2 ? "DOBLE" : tipo === 1 ? "NORMAL" : "",
+        cantidadHoras: Number(row.tex_cantidad_horas),
+        motivo: row.tex_motivo,
+        empleadoNombre: `${row.emp_nombres || ""} ${row.emp_apellidos || ""}`.trim(),
+        empleadoCodigo: row.emp_id,
+        empleadoDpi: row.emp_dpi,
+        fechaCreacion: row.tex_fecha_creacion,
+        usuarioCreacion: row.tex_usuario_creacion
+      };
+    }
   },
   dietas: {
     dir: "dietas",
@@ -106,6 +120,7 @@ const configs = {
       fechaRecibido: row.vdi_fecha_recibido,
       estado: row.vdi_estado,
       observaciones: row.vdi_observaciones,
+      periodo: row.vdi_periodo || null,
       juntaNombre: `${row.jun_nombre || ""} ${row.jun_apellidos || ""}`.trim(),
       juntaPuesto: row.jun_puesto,
       fechaCreacion: row.vdi_fecha_creacion,
@@ -151,13 +166,20 @@ const validateDate = (value, label) => {
   if (!value || Number.isNaN(Date.parse(value))) throw createError(`${label} invalida`);
 };
 
-// Version IV: la columna tex_cantidad_horas es INT, por lo que se redondea hacia
-// arriba cualquier fraccion de hora. Devuelve 0 cuando el rango no es valido
-// (lo captura luego validateDate / la regla "final > inicio").
-const calculateHours = (start, end) => {
-  const diffMs = new Date(end) - new Date(start);
-  if (!(diffMs > 0)) return 0;
-  return Math.ceil(diffMs / 3600000);
+// Tiempo extra: a partir de la FECHA PAGO deriva el primer y último día del mes
+// (tex_fecha_hora_inicio / tex_fecha_hora_final). No depende de Date para evitar
+// desfases de zona horaria; usa días reales del mes (con año bisiesto).
+const lastDayOfMonth = (year, month) => {
+  const dias = [31, (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return dias[month - 1];
+};
+
+const mesDesdeFechaPago = (fechaPago) => {
+  const periodo = String(fechaPago).slice(0, 7); // YYYY-MM
+  const [year, month] = periodo.split("-").map(Number);
+  const inicio = `${periodo}-01`;
+  const final = `${periodo}-${String(lastDayOfMonth(year, month)).padStart(2, "0")}`;
+  return { inicio, final };
 };
 
 // Version IV (Pago de dietas): los montos se calculan desde RPJ_CAT_PARAMETRO_GENERAL.

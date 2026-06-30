@@ -13,6 +13,7 @@ SELECT
   d.vdi_valor_pago,
   d.vdi_estado,
   d.vdi_observaciones,
+  d.vdi_periodo,
   d.vdi_fecha_creacion,
   d.vdi_usuario_creacion,
   j.jun_nombre,
