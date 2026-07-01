@@ -127,27 +127,34 @@ CALL _dt_add_column('RPJ_MNT_TIEMPO_EXTRAORDINARIO', 'tex_fecha_pago', "tex_fech
 -- ============================================================================
 SELECT 'BLOQUE 3: siembra de catalogos' AS etapa;
 
+-- NOTA: en MySQL un SELECT con WHERE requiere FROM (usar FROM DUAL); sin él es
+-- error de sintaxis. El patrón idempotente "insertar si no existe" es:
+--   INSERT INTO t (...) SELECT <valores> FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM t WHERE ...)
 CALL _dt_safe(
   "INSERT INTO RPJ_CAT_TIPO_INGRESO (tin_tipo_ingreso, tin_descripcion, tin_usuario_creacion)
-   SELECT 'HORA EXTRA','Hora extra normal (tiempo extraordinario)','sistema'
+   SELECT 'HORA EXTRA','Hora extra normal (tiempo extraordinario)','sistema' FROM DUAL
    WHERE NOT EXISTS (SELECT 1 FROM RPJ_CAT_TIPO_INGRESO WHERE UPPER(tin_tipo_ingreso) = 'HORA EXTRA')");
 
 CALL _dt_safe(
   "INSERT INTO RPJ_CAT_TIPO_INGRESO (tin_tipo_ingreso, tin_descripcion, tin_usuario_creacion)
-   SELECT 'HORA EXTRA DOBLE','Hora extra doble (tiempo extraordinario)','sistema'
+   SELECT 'HORA EXTRA DOBLE','Hora extra doble (tiempo extraordinario)','sistema' FROM DUAL
    WHERE NOT EXISTS (SELECT 1 FROM RPJ_CAT_TIPO_INGRESO WHERE UPPER(tin_tipo_ingreso) = 'HORA EXTRA DOBLE')");
 
 CALL _dt_safe(
   "INSERT INTO RPJ_CAT_TIPO_DESCUENTO (tde_tipo_descuento, tde_descripcion, tde_usuario_creacion)
-   SELECT 'IGSS','Cuota laboral IGSS','sistema'
+   SELECT 'IGSS','Cuota laboral IGSS','sistema' FROM DUAL
    WHERE NOT EXISTS (SELECT 1 FROM RPJ_CAT_TIPO_DESCUENTO WHERE UPPER(tde_tipo_descuento) = 'IGSS')");
 
--- Tipo de planilla 3 (sólo para mostrar el nombre en pantallas; el SP usa el id 3 directo).
-CALL _dt_safe(
+-- Tipo de planilla 3. El tpl_id_tipo_uso se calcula en una variable ANTES para no
+-- referenciar la tabla destino en la lista SELECT (evita error 1093). Este id 3 es
+-- necesario si RPJ_PRC_NOMINA_INGRESO.nin_id_tipo_planilla tiene FK a tpl_id
+-- (de lo contrario el SP fallaría al generar y haría ROLLBACK).
+SET @uso_tipo := (SELECT COALESCE(MIN(tpl_id_tipo_uso), 1) FROM RPJ_CAT_TIPO_PLANILLA);
+SET @uso_tipo := COALESCE(@uso_tipo, 1);
+CALL _dt_safe(CONCAT(
   "INSERT INTO RPJ_CAT_TIPO_PLANILLA (tpl_id, tpl_tipo_planilla, tpl_descripcion, tpl_id_tipo_uso, tpl_usuario_creacion)
-   SELECT 3,'NOMINA TIEMPO EXTRA','Nomina de tiempo extraordinario',
-          (SELECT COALESCE(MIN(tpl_id_tipo_uso),1) FROM RPJ_CAT_TIPO_PLANILLA),'sistema'
-   WHERE NOT EXISTS (SELECT 1 FROM RPJ_CAT_TIPO_PLANILLA WHERE tpl_id = 3)");
+   SELECT 3,'NOMINA TIEMPO EXTRA','Nomina de tiempo extraordinario',", @uso_tipo, ",'sistema' FROM DUAL
+   WHERE NOT EXISTS (SELECT 1 FROM RPJ_CAT_TIPO_PLANILLA WHERE tpl_id = 3)"));
 
 -- ============================================================================
 -- BLOQUE 4 — SP sp_generar_nomina_tiempo_extra  (planilla tipo 3)
@@ -183,8 +190,9 @@ BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
+        GET DIAGNOSTICS CONDITION 1 @dt_errno = MYSQL_ERRNO, @dt_msg = MESSAGE_TEXT;
         ROLLBACK;
-        SET p_resultado = 'ERROR: Ocurrio un problema durante el proceso. Se realizo ROLLBACK.';
+        SET p_resultado = CONCAT('ERROR: ', @dt_errno, ' - ', @dt_msg);
     END;
 
     -- 1. Validar planilla: existe, tipo 3 y ABIERTA

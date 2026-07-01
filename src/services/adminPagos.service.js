@@ -2,6 +2,7 @@ const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
+const { toISODate } = require("../utils/date");
 
 const TIPOS_HORA = ["DIURNA", "NOCTURNA", "MIXTA", "FERIADO"];
 const ESTADOS_DIETA = ["PENDIENTE", "PAGADO", "RECIBIDO", "ANULADO"];
@@ -48,11 +49,9 @@ const configs = {
       return {
         id: row.tex_correlativo,
         idEmpleado: row.tex_id_empleado,
-        fechaPago: row.tex_fecha_pago
-          ? String(row.tex_fecha_pago).slice(0, 10)
-          : (row.tex_fecha_hora_inicio ? String(row.tex_fecha_hora_inicio).slice(0, 10) : null),
-        fechaInicio: row.tex_fecha_hora_inicio ? String(row.tex_fecha_hora_inicio).slice(0, 10) : null,
-        fechaFinal: row.tex_fecha_hora_final ? String(row.tex_fecha_hora_final).slice(0, 10) : null,
+        fechaPago: toISODate(row.tex_fecha_pago) || toISODate(row.tex_fecha_hora_inicio),
+        fechaInicio: toISODate(row.tex_fecha_hora_inicio),
+        fechaFinal: toISODate(row.tex_fecha_hora_final),
         tipoHora: [1, 2].includes(tipo) ? tipo : null,
         tipoHoraNombre: tipo === 2 ? "DOBLE" : tipo === 1 ? "NORMAL" : "",
         cantidadHoras: Number(row.tex_cantidad_horas),

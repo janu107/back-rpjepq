@@ -1,6 +1,7 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const { toISODate } = require("../utils/date");
 
 // Módulo de Dietas (maestro-detalle):
 //   RPJ_MNT_SESION       -> actas/reuniones de la junta directiva
@@ -27,7 +28,7 @@ const periodoDeFecha = (fecha) => String(fecha || "").slice(0, 7); // YYYY-MM
 const mapSesion = (row) => ({
   id: row.ses_correlativo,
   acta: row.ses_acta,
-  fechaSesion: row.ses_fecha_sesion ? String(row.ses_fecha_sesion).slice(0, 10) : null,
+  fechaSesion: toISODate(row.ses_fecha_sesion),
   descripcion: row.ses_descripcion,
   estado: row.ses_estado,
   asistentes: num(row.asistentes),

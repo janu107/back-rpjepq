@@ -2,6 +2,7 @@ const adminPagos = require("./adminPagos.service");
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const { toISODate } = require("../utils/date");
 
 // Pago de Dietas (modelo vdi_*). El CRUD básico del encabezado se delega en
 // adminPagos; aquí se agregan las operaciones del flujo maestro-detalle:
@@ -65,7 +66,7 @@ const detalle = async (id) => {
       valor: num(r.die_valor),
       idSesion: r.ses_correlativo,
       acta: r.ses_acta,
-      fechaSesion: r.ses_fecha_sesion ? String(r.ses_fecha_sesion).slice(0, 10) : null,
+      fechaSesion: toISODate(r.ses_fecha_sesion),
       descripcion: r.ses_descripcion,
       estado: r.ses_estado
     }))
