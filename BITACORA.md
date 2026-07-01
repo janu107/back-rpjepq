@@ -35,6 +35,20 @@
 - Sin cambios de backend: el frontend consume el endpoint existente
   `GET /catalogos/firma-planilla` (`RPJ_CAT_FIRMA_PLANILLA`: nombre/puesto).
 
+### Reporte de Pago de Dietas — Error 500
+- **Causa:** tras migrar Dietas a `vdi_*`, la consulta del reporte
+  (`sql/reportes/regimen/reporteDietas.sql`) seguía usando columnas `die_*`
+  (`die_correlativo`, `die_valor`, `die_id_junta_directiva`, etc.), que ya no existen →
+  la petición `GET /reportes/regimen/dietas` devolvía **500** ("Error interno del servidor").
+- **Cambio:**
+  - `sql/reportes/regimen/reporteDietas.sql`: reescrito al modelo `vdi_*`
+    (encabezado mensual): periodo, total sesiones, valor, ISR, valor pago, estado, fecha pago;
+    JOIN por `vdi_id_junta_directiva`.
+  - `src/services/reportesRegimen.service.js` (`mapDieta`): mapea columnas `vdi_*`
+    (agrega `periodo` y `estado`; quita `acta`/`fechaSesion` que no aplican al encabezado).
+- **Verificado:** los 4 reportes cargan sin fallos. Las firmas
+  (`/catalogos/firma-planilla`) ya funcionaban; el 500 era solo del reporte de dietas.
+
 ### Recordatorio pendiente
 - Fijar en Parámetros Generales: `par_porcentaje_tiempo_extra = 1.50` y
   `par_porcentaje_tiemext_doble = 2.00` (multiplicadores).

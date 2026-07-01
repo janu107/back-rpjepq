@@ -38,18 +38,18 @@ const mapJunta = (row) => ({
 });
 
 const mapDieta = (row) => ({
-  id: row.die_correlativo,
+  id: row.vdi_correlativo,
   miembroNombre: row.miembro_nombre,
   puesto: row.jun_puesto,
   tipoJunta: row.jun_tipo_junta,
   manejoDescripcion: row.manejo_descripcion,
-  valor: number(row.die_valor),
-  retencionIsr: number(row.die_retencion_isr),
-  liquido: number(row.die_liquido),
-  fechaSesion: row.die_fecha_sesion,
-  fechaPago: row.die_fecha_pago,
-  sesionesMes: row.die_sesiones_mes,
-  acta: row.die_acta
+  periodo: row.vdi_periodo,
+  valor: number(row.vdi_valor),
+  retencionIsr: number(row.vdi_isr),
+  liquido: number(row.vdi_valor_pago),
+  fechaPago: row.vdi_fecha_pago,
+  sesionesMes: row.vdi_total_sesiones,
+  estado: row.vdi_estado
 });
 
 const mapEmpleado = (row) => ({
