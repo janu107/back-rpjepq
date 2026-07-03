@@ -270,7 +270,7 @@ BEGIN
                                 WHERE s2.sal_id_empleado = s.sal_id_empleado AND s2.sal_tipo_manejo = 1)
                   ) base ON base.sal_id_empleado = e.emp_correlativo
                  WHERE UPPER(COALESCE(e.emp_estado,'ACTIVO')) <> 'INACTIVO'
-                   AND t.tex_tipo_hora = 1
+                   AND t.tex_tipo_hora = '1'   -- comparar como TEXTO: la columna puede tener 'MIXTA','N/A', etc. (evita ERROR 1292)
                    AND COALESCE(t.tex_fecha_pago, DATE(t.tex_fecha_hora_inicio)) BETWEEN v_fecha_inicio AND v_fecha_final;
                 SET v_he_normal = ROW_COUNT();
 
@@ -301,7 +301,7 @@ BEGIN
                                 WHERE s2.sal_id_empleado = s.sal_id_empleado AND s2.sal_tipo_manejo = 1)
                   ) base ON base.sal_id_empleado = e.emp_correlativo
                  WHERE UPPER(COALESCE(e.emp_estado,'ACTIVO')) <> 'INACTIVO'
-                   AND t.tex_tipo_hora = 2
+                   AND t.tex_tipo_hora = '2'   -- comparar como TEXTO (evita ERROR 1292 con valores no numéricos)
                    AND COALESCE(t.tex_fecha_pago, DATE(t.tex_fecha_hora_inicio)) BETWEEN v_fecha_inicio AND v_fecha_final;
                 SET v_he_doble = ROW_COUNT();
 

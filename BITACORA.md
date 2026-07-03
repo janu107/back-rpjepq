@@ -49,6 +49,21 @@
 - **Verificado:** los 4 reportes cargan sin fallos. Las firmas
   (`/catalogos/firma-planilla`) ya funcionaban; el 500 era solo del reporte de dietas.
 
+## 2026-07-03 — Fix SP tiempo extra: ERROR 1292 'MIXTA'
+
+- **Síntoma (producción MySQL 8):** al generar nómina de tiempo extra:
+  `ERROR 1292 - Truncated incorrect DOUBLE value: 'MIXTA'`.
+- **Causa:** en `sp_generar_nomina_tiempo_extra` se comparaba `tex_tipo_hora = 1` /
+  `= 2` (número), pero `tex_tipo_hora` es TEXTO y tiene valores viejos no numéricos
+  (`'MIXTA'`, `'DIURNA'`, `'N/A'`). MySQL 8 (estricto) convierte 'MIXTA'→DOUBLE y lanza 1292.
+  (MariaDB local es permisivo y solo advierte, por eso no reventaba en local.)
+- **Cambio:** comparar como texto: `tex_tipo_hora = '1'` y `= '2'` (en
+  `sql/migraciones/migration_dietas_tiempo_extra.sql`). Sin conversión numérica → sin 1292.
+  Funcional: incluye tipo '1'/'2' y excluye los no numéricos.
+- **Aplicado y verificado en PRODUCCIÓN** (SP recreado directamente en 143.198.182.147).
+  También aplicado en la BD local. Falta commitear el archivo de migración al repo.
+
 ### Recordatorio pendiente
 - Fijar en Parámetros Generales: `par_porcentaje_tiempo_extra = 1.50` y
-  `par_porcentaje_tiemext_doble = 2.00` (multiplicadores).
+  `par_porcentaje_tiemext_doble = 2.00` (multiplicadores). **Importante:** el generar ya no
+  falla, pero si el parámetro sigue en 0.15 los montos de hora extra saldrán bajos.
