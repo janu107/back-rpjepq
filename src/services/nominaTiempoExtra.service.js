@@ -1,3 +1,4 @@
+const ExcelJS = require("exceljs");
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
@@ -105,4 +106,84 @@ const getDetalle = async (id) => {
   return rows.map(mapDetalle);
 };
 
-module.exports = { list, getById, create, generar, getDetalle };
+const assertCan = (action, estado) => {
+  const allowed = { cerrar: ["GENERADA"], reversar: ["GENERADA"] }[action] || [];
+  if (!allowed.includes(estado)) throw createError(`No se puede ${action} una planilla de tiempo extra en estado ${estado}`, 409);
+};
+
+const cerrar = async (id, currentUser) => {
+  const planilla = await getById(id);
+  assertCan("cerrar", planilla.estadoProceso);
+  const usuario = currentUser?.usuario || "sistema";
+  logger.info("Cerrando planilla tiempo extra", { idPlanilla: id, usuario });
+  const conn = await pool.getConnection();
+  try {
+    await conn.query("CALL sp_cerrar_planilla(?, ?)", [id, usuario]);
+  } finally {
+    conn.release();
+  }
+  return getById(id);
+};
+
+const reversar = async (id, motivo, currentUser) => {
+  if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
+  const planilla = await getById(id);
+  assertCan("reversar", planilla.estadoProceso);
+  const usuario = currentUser?.usuario || "sistema";
+  logger.info("Reversando planilla tiempo extra", { idPlanilla: id, usuario });
+  const conn = await pool.getConnection();
+  try {
+    await conn.query("CALL sp_reversar_planilla_tiempo_extra(?, ?, ?)", [id, usuario, motivo]);
+  } finally {
+    conn.release();
+  }
+  return getById(id);
+};
+
+const exportExcel = async (id) => {
+  const [planilla, detalle] = await Promise.all([getById(id), getDetalle(id)]);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Nomina Tiempo Extra");
+
+  ws.columns = [
+    { header: "DPI",             key: "dpi",             width: 16 },
+    { header: "Nombre Completo", key: "nombreCompleto",  width: 30 },
+    { header: "Puesto",          key: "puesto",          width: 22 },
+    { header: "Horas Extra",     key: "horas",           width: 12 },
+    { header: "Total Ingresos",  key: "totalIngresos",   width: 16 },
+    { header: "IGSS",            key: "totalDescuentos", width: 14 },
+    { header: "Neto a Pagar",    key: "netoPagar",       width: 16 }
+  ];
+
+  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E5F" } };
+
+  detalle.forEach((r) => ws.addRow(r));
+
+  const tot = ws.addRow({
+    nombreCompleto: "TOTAL",
+    horas: detalle.reduce((s, r) => s + num(r.horas), 0),
+    totalIngresos: detalle.reduce((s, r) => s + num(r.totalIngresos), 0),
+    totalDescuentos: detalle.reduce((s, r) => s + num(r.totalDescuentos), 0),
+    netoPagar: detalle.reduce((s, r) => s + num(r.netoPagar), 0)
+  });
+  tot.font = { bold: true };
+
+  const buf = await wb.xlsx.writeBuffer();
+  return { buffer: buf, filename: `nomina_tiempo_extra_${planilla.numero}.xlsx` };
+};
+
+const exportBanco = async (id) => {
+  const [planilla, detalle] = await Promise.all([getById(id), getDetalle(id)]);
+  const lines = detalle.map((r) => {
+    const nombre = (r.nombreCompleto || "").substring(0, 40).padEnd(40);
+    const monto = num(r.netoPagar).toFixed(2);
+    return `${r.dpi || ""}|${nombre}|${monto}`;
+  });
+  return {
+    content: lines.join("\n"),
+    filename: `banco_tiempo_extra_${planilla.numero}.txt`
+  };
+};
+
+module.exports = { list, getById, create, generar, getDetalle, cerrar, reversar, exportExcel, exportBanco };
