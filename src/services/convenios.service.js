@@ -20,17 +20,17 @@ const candidatos = async (q) => {
   const pj = term ? [like, like, like] : [];
   const [jubs] = await pool.query(
     `SELECT 'jubilado' AS tipo, j.jub_correlativo AS id, CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre,
-            j.jub_dpi AS dpi, SUM(d.deu_monto_pendiente) AS saldo
+            j.jub_dpi AS dpi, SUM(d.deu_saldo) AS saldo
        FROM RPJ_MNT_JUBILADO j
-       INNER JOIN RPJ_PRC_DEUDA_JUBILADO d ON d.deu_id_jubilado = j.jub_correlativo AND d.deu_id_beneficiario IS NULL
+       INNER JOIN RPJ_MNT_DEUDA d ON d.deu_id_jubilado = j.jub_correlativo AND d.deu_id_beneficiario IS NULL
       WHERE d.deu_es_deuda = 1 AND d.deu_estado IN ('PENDIENTE','PARCIAL')${fj}
       GROUP BY j.jub_correlativo HAVING saldo > 0 ORDER BY nombre LIMIT 20`, pj
   );
   const [bens] = await pool.query(
     `SELECT 'beneficiario' AS tipo, b.ben_correlativo AS id, CONCAT(b.ben_nombres,' ',b.ben_apellidos) AS nombre,
-            b.ben_dpi AS dpi, SUM(d.deu_monto_pendiente) AS saldo
+            b.ben_dpi AS dpi, SUM(d.deu_saldo) AS saldo
        FROM RPJ_MNT_BENEFICIARIO b
-       INNER JOIN RPJ_PRC_DEUDA_JUBILADO d ON d.deu_id_beneficiario = b.ben_correlativo
+       INNER JOIN RPJ_MNT_DEUDA d ON d.deu_id_beneficiario = b.ben_correlativo
       WHERE d.deu_es_deuda = 1 AND d.deu_estado IN ('PENDIENTE','PARCIAL')${fb}
       GROUP BY b.ben_correlativo HAVING saldo > 0 ORDER BY nombre LIMIT 20`, pj
   );
@@ -43,8 +43,8 @@ const deudaPorPersona = async (tipo, id) => {
   const col = t === "jubilado" ? "deu_id_jubilado" : "deu_id_beneficiario";
   const extra = t === "jubilado" ? "AND deu_id_beneficiario IS NULL" : "";
   const [[row]] = await pool.query(
-    `SELECT COALESCE(SUM(deu_monto_pendiente),0) AS saldo, COUNT(*) AS periodos
-       FROM RPJ_PRC_DEUDA_JUBILADO
+    `SELECT COALESCE(SUM(deu_saldo),0) AS saldo, COUNT(*) AS periodos
+       FROM RPJ_MNT_DEUDA
       WHERE ${col} = ? ${extra} AND deu_es_deuda = 1 AND deu_estado IN ('PENDIENTE','PARCIAL')`,
     [id]
   );
@@ -62,12 +62,17 @@ const calcularFechaFin = (tipo, fechaInicio, cuotas) => {
 const crear = async (payload, currentUser) => {
   if (!TIPOS.includes(String(payload?.tipo || "").toUpperCase())) throw createError("Tipo de convenio no válido");
   const tipo = String(payload.tipo).toUpperCase();
-  const idJubilado = payload.idJubilado || null;
-  const idBeneficiario = payload.idBeneficiario || null;
-  if (!idJubilado && !idBeneficiario) throw createError("Debe indicar un jubilado o un beneficiario");
-  if (idJubilado && idBeneficiario) throw createError("Indique solo jubilado O beneficiario, no ambos");
+  let conIdJubilado = payload.idJubilado || null;
+  const conIdBeneficiario = payload.idBeneficiario || null;
+  if (!conIdJubilado && !conIdBeneficiario) throw createError("Debe indicar un jubilado o un beneficiario");
+  // con_id_jubilado es NOT NULL en la BD: si es convenio de beneficiario, tomamos su jubilado padre.
+  if (!conIdJubilado && conIdBeneficiario) {
+    const [[b]] = await pool.execute("SELECT ben_id_jubilado FROM RPJ_MNT_BENEFICIARIO WHERE ben_correlativo = ?", [conIdBeneficiario]);
+    if (!b) throw createError("Beneficiario no encontrado", 404);
+    conIdJubilado = b.ben_id_jubilado;
+  }
   if (!payload.noDocumento || String(payload.noDocumento).trim() === "") throw createError("El número de documento es obligatorio");
-  if (payload.autorizadoPor && !AUTORIZA.includes(String(payload.autorizadoPor).toUpperCase())) throw createError("Autorizado por no válido");
+  if (!payload.autorizadoPor || !AUTORIZA.includes(String(payload.autorizadoPor).toUpperCase())) throw createError("Autorizado por es obligatorio y debe ser válido");
 
   const deudaTotal = toNum(payload.deudaTotal);
   if (deudaTotal <= 0) throw createError("La deuda total debe ser mayor a 0");
@@ -80,23 +85,23 @@ const crear = async (payload, currentUser) => {
   const fechaFin = calcularFechaFin(tipo, fechaInicio, cuotas);
   const usuario = currentUser?.usuario || "sistema";
 
-  logger.info("Creando convenio de pago", { tipo, idJubilado, idBeneficiario, cuotas, usuario });
+  logger.info("Creando convenio de pago", { tipo, conIdJubilado, conIdBeneficiario, cuotas, usuario });
   const [res] = await pool.execute(
     `INSERT INTO RPJ_MNT_CONVENIO_PAGO
-       (con_id_jubilado, con_id_beneficiario, con_tipo, con_deuda_total, con_cantidad_cuotas, con_monto_cuota,
-        con_fecha_inicio, con_fecha_fin, con_autorizado_por, con_no_documento, con_estado, con_usuario_creacion)
+       (con_id_jubilado, con_id_beneficiario, con_tipo_convenio, con_monto_total, con_cantidad_cuotas, con_monto_cuota,
+        con_fecha_inicio, con_fecha_fin_estimada, con_autorizado_por, con_no_documento, con_estado, con_usuario_creacion)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VIGENTE', ?)`,
-    [idJubilado, idBeneficiario, tipo, deudaTotal, cuotas, montoCuota, fechaInicio, fechaFin,
-     payload.autorizadoPor ? String(payload.autorizadoPor).toUpperCase() : null, payload.noDocumento, usuario]
+    [conIdJubilado, conIdBeneficiario, tipo, deudaTotal, cuotas, montoCuota, fechaInicio, fechaFin,
+     String(payload.autorizadoPor).toUpperCase(), payload.noDocumento, usuario]
   );
   return { id: res.insertId, tipo, cantidadCuotas: cuotas, montoCuota, fechaInicio, fechaFin };
 };
 
 const vigentes = async () => {
   const [rows] = await pool.execute(
-    `SELECT c.con_correlativo AS id, c.con_tipo AS tipo, c.con_deuda_total AS deudaTotal,
+    `SELECT c.con_correlativo AS id, c.con_tipo_convenio AS tipo, c.con_monto_total AS deudaTotal,
             c.con_cantidad_cuotas AS cantidadCuotas, c.con_monto_cuota AS montoCuota,
-            c.con_fecha_inicio AS fechaInicio, c.con_fecha_fin AS fechaFin, c.con_autorizado_por AS autorizadoPor,
+            c.con_fecha_inicio AS fechaInicio, c.con_fecha_fin_estimada AS fechaFin, c.con_autorizado_por AS autorizadoPor,
             c.con_no_documento AS noDocumento, c.con_estado AS estado,
             COALESCE(CONCAT(j.jub_nombres,' ',j.jub_apellidos), CONCAT(b.ben_nombres,' ',b.ben_apellidos)) AS titular,
             IF(c.con_id_jubilado IS NOT NULL, 'JUBILADO', 'BENEFICIARIO') AS tipoTitular

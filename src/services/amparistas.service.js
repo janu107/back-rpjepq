@@ -29,12 +29,12 @@ const registrar = async (payload, currentUser) => {
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Registrando amparista", { idJubilado: payload.idJubilado, expediente: payload.noExpediente, usuario });
   const out = await callSp(
-    "sp_registrar_amparista(?, ?, ?, ?, ?, ?, ?, ?, @p_adj, @p_res)",
+    "sp_registrar_amparista(?, ?, ?, ?, ?, ?, ?, ?, @p_res)",
     [payload.idJubilado, payload.noExpediente, payload.juzgado, payload.fechaSentencia,
      payload.fechaEfectiva, payload.abogado || null, payload.observaciones || null, usuario],
-    ["p_adj", "p_res"]
+    ["p_res"]
   );
-  return { deudasAjustadas: toNum(out.p_adj), message: out.p_res };
+  return { message: out.p_res };
 };
 
 const vigentes = async () => {
@@ -43,7 +43,7 @@ const vigentes = async () => {
             CONCAT(ju.jub_nombres, ' ', ju.jub_apellidos) AS jubiladoNombre, ju.jub_dpi AS dpi,
             j.jui_no_expediente AS noExpediente, j.jui_juzgado AS juzgado,
             j.jui_fecha_sentencia AS fechaSentencia, j.jui_fecha_efectiva AS fechaEfectiva,
-            j.jui_abogado AS abogado, j.jui_estado AS estado
+            j.jui_abogado_asociacion AS abogado, j.jui_estado AS estado
        FROM RPJ_MNT_JUICIO j
        INNER JOIN RPJ_MNT_JUBILADO ju ON ju.jub_correlativo = j.jui_id_jubilado
       WHERE j.jui_estado = 'VIGENTE'
@@ -67,7 +67,7 @@ const revocar = async (idJuicio, motivo, currentUser) => {
   try {
     await conn.beginTransaction();
     await conn.execute(
-      "UPDATE RPJ_MNT_JUICIO SET jui_estado = 'REVOCADO', jui_observaciones = CONCAT(COALESCE(jui_observaciones,''), ' | REVOCADO: ', ?) WHERE jui_correlativo = ?",
+      "UPDATE RPJ_MNT_JUICIO SET jui_estado = 'REVOCADO', jui_fecha_revocacion = CURDATE(), jui_motivo_revocacion = ? WHERE jui_correlativo = ?",
       [motivo, idJuicio]
     );
     await conn.execute("UPDATE RPJ_MNT_JUBILADO SET jub_tipo_pago = 'NORMAL' WHERE jub_correlativo = ?", [idJubilado]);

@@ -17,7 +17,7 @@ const dashboardResumen = async () => {
         WHERE j.jub_estado_pago='FALLECIDO') AS fallecidosConBeneficiarios,
       (SELECT COUNT(*) FROM RPJ_MNT_BENEFICIARIO WHERE ben_estado='ACTIVO') AS beneficiariosActivos,
       (SELECT COUNT(*) FROM RPJ_MNT_BENEFICIARIO WHERE ben_estado='SUSPENDIDO') AS beneficiariosSuspendidos,
-      (SELECT COALESCE(SUM(deu_monto_pendiente),0) FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL')) AS deudaTotal
+      (SELECT COALESCE(SUM(deu_saldo),0) FROM RPJ_MNT_DEUDA WHERE deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL')) AS deudaTotal
   `);
   return {
     jubiladosNormalActivos: toNum(k.normalesActivos),
@@ -33,9 +33,9 @@ const saldos = async () => {
   const [rows] = await pool.query(`
     SELECT j.jub_correlativo AS idJubilado, CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre, j.jub_dpi AS dpi,
            j.jub_tipo_pago AS tipoPago, j.jub_estado_pago AS estadoPago,
-           COALESCE(SUM(CASE WHEN d.deu_es_deuda=1 AND d.deu_estado IN ('PENDIENTE','PARCIAL') THEN d.deu_monto_pendiente ELSE 0 END),0) AS saldo
+           COALESCE(SUM(CASE WHEN d.deu_es_deuda=1 AND d.deu_estado IN ('PENDIENTE','PARCIAL') THEN d.deu_saldo ELSE 0 END),0) AS saldo
       FROM RPJ_MNT_JUBILADO j
-      LEFT JOIN RPJ_PRC_DEUDA_JUBILADO d ON d.deu_id_jubilado=j.jub_correlativo
+      LEFT JOIN RPJ_MNT_DEUDA d ON d.deu_id_jubilado=j.jub_correlativo
      WHERE j.jub_tipo_manejo=2
      GROUP BY j.jub_correlativo HAVING saldo > 0 ORDER BY saldo DESC`);
   return rows.map((r) => ({ ...r, saldo: toNum(r.saldo) }));
@@ -73,8 +73,8 @@ const beneficiariosActivos = async () => {
 
 const convenios = async () => {
   const [rows] = await pool.query(`
-    SELECT c.con_correlativo AS id, c.con_tipo AS tipo, c.con_estado AS estado, c.con_deuda_total AS deudaTotal,
-           c.con_monto_cuota AS montoCuota, c.con_cantidad_cuotas AS cuotas, c.con_fecha_inicio AS fechaInicio, c.con_fecha_fin AS fechaFin,
+    SELECT c.con_correlativo AS id, c.con_tipo_convenio AS tipo, c.con_estado AS estado, c.con_monto_total AS deudaTotal,
+           c.con_monto_cuota AS montoCuota, c.con_cantidad_cuotas AS cuotas, c.con_fecha_inicio AS fechaInicio, c.con_fecha_fin_estimada AS fechaFin,
            COALESCE(CONCAT(j.jub_nombres,' ',j.jub_apellidos), CONCAT(b.ben_nombres,' ',b.ben_apellidos)) AS titular
       FROM RPJ_MNT_CONVENIO_PAGO c
       LEFT JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo=c.con_id_jubilado
@@ -87,8 +87,8 @@ const deudaPorTipo = async () => {
   const [rows] = await pool.query(`
     SELECT deu_tipo_pago AS tipoPago,
            SUM(CASE WHEN deu_es_deuda=1 THEN 1 ELSE 0 END) AS periodosDeuda,
-           COALESCE(SUM(CASE WHEN deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_monto_pendiente ELSE 0 END),0) AS saldo
-      FROM RPJ_PRC_DEUDA_JUBILADO GROUP BY deu_tipo_pago`);
+           COALESCE(SUM(CASE WHEN deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_saldo ELSE 0 END),0) AS saldo
+      FROM RPJ_MNT_DEUDA GROUP BY deu_tipo_pago`);
   return rows.map((r) => ({ tipoPago: r.tipoPago, periodosDeuda: toNum(r.periodosDeuda), saldo: toNum(r.saldo) }));
 };
 

@@ -70,8 +70,8 @@ const assertJubilado = async (id) => {
 const deudaTotal = async (id) => {
   await assertJubilado(id);
   const [rows] = await pool.execute(
-    `SELECT COALESCE(SUM(deu_monto_pendiente), 0) AS deudaTotal, COUNT(*) AS periodos
-       FROM RPJ_PRC_DEUDA_JUBILADO
+    `SELECT COALESCE(SUM(deu_saldo), 0) AS deudaTotal, COUNT(*) AS periodos
+       FROM RPJ_MNT_DEUDA
       WHERE deu_id_jubilado = ? AND deu_es_deuda = 1 AND deu_estado IN ('PENDIENTE','PARCIAL')`,
     [id]
   );
@@ -106,11 +106,12 @@ const resumenFinanciero = async (id) => {
       ORDER BY sal_correlativo LIMIT 1`, [id]
   );
   const [[deu]] = await pool.execute(
-    `SELECT COALESCE(SUM(CASE WHEN deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_monto_pendiente ELSE 0 END),0) AS deudaPendiente,
+    `SELECT COALESCE(SUM(CASE WHEN deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_saldo ELSE 0 END),0) AS deudaPendiente,
             COALESCE(SUM(CASE WHEN deu_es_deuda=1 AND deu_estado IN ('PENDIENTE','PARCIAL') THEN 1 ELSE 0 END),0) AS periodosDeuda,
             COALESCE(SUM(CASE WHEN deu_es_deuda=0 THEN 1 ELSE 0 END),0) AS periodosHistoria,
-            COALESCE(SUM(deu_monto_pagado),0) AS totalPagado
-       FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ?`, [id]
+            COALESCE(SUM(CASE WHEN deu_es_deuda=1 THEN deu_monto_pagado ELSE 0 END),0) AS totalPagado,
+            COALESCE(SUM(CASE WHEN deu_es_deuda=1 THEN deu_monto_generado ELSE 0 END),0) AS deudaGenerada
+       FROM RPJ_MNT_DEUDA WHERE deu_id_jubilado = ?`, [id]
   );
   return {
     ...mapJubBusqueda(jub),
@@ -118,7 +119,8 @@ const resumenFinanciero = async (id) => {
     deudaPendiente: toNum(deu.deudaPendiente),
     periodosDeuda: toNum(deu.periodosDeuda),
     periodosHistoria: toNum(deu.periodosHistoria),
-    totalPagado: toNum(deu.totalPagado)
+    totalPagado: toNum(deu.totalPagado),
+    deudaGenerada: toNum(deu.deudaGenerada)
   };
 };
 
@@ -143,13 +145,13 @@ const ultimosPagos = async (id, limit) => {
 
 const mapDeuda = (d) => ({
   id: d.id, periodo: d.periodo, esDeuda: Boolean(d.esDeuda), tipoPago: d.tipoPago,
-  pensionCompleta: toNum(d.pensionCompleta), montoPagado: toNum(d.montoPagado),
+  pensionCompleta: toNum(d.pensionCompleta), montoGenerado: toNum(d.montoGenerado), montoPagado: toNum(d.montoPagado),
   saldo: toNum(d.saldo), estado: d.estado, fechaGeneracion: d.fechaGeneracion
 });
 const SELECT_DEUDA = `SELECT deu_correlativo AS id, deu_periodo AS periodo, deu_es_deuda AS esDeuda,
-  deu_tipo_pago AS tipoPago, deu_monto_original AS pensionCompleta, deu_monto_pagado AS montoPagado,
-  deu_monto_pendiente AS saldo, deu_estado AS estado, deu_fecha_generacion AS fechaGeneracion
-  FROM RPJ_PRC_DEUDA_JUBILADO`;
+  deu_tipo_pago AS tipoPago, deu_pension_completa AS pensionCompleta, deu_monto_generado AS montoGenerado,
+  deu_monto_pagado AS montoPagado, deu_saldo AS saldo, deu_estado AS estado, deu_fecha_generacion AS fechaGeneracion
+  FROM RPJ_MNT_DEUDA`;
 
 const deudaDetalle = async (id) => {
   await assertJubilado(id);

@@ -39,17 +39,15 @@ const generarJubilados = async (idPlanilla, tipoIngreso, currentUser) => {
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Generando nomina jubilados (normal + beneficiarios)", { idPlanilla, usuario });
 
-  const outN = await callSp(
-    "sp_generar_nomina_pensionados(?, ?, ?, @p_proc, @p_excl, @p_pag, @p_desc)",
-    [idPlanilla, tipoIngreso || 0, usuario], ["p_proc", "p_excl", "p_pag", "p_desc"]
-  );
-  const outB = await callSp(
-    "sp_generar_nomina_beneficiarios(?, ?, @b_proc, @b_tot, @b_res)",
-    [idPlanilla, usuario], ["b_proc", "b_tot", "b_res"]
+  // SP del equipo: la nómina normal ya procesa jubilados vivos + beneficiarios de fallecidos.
+  const out = await callSp(
+    "sp_generar_nomina_jubilados_normal(?, ?, @p_proc, @p_ben, @p_pag, @p_res)",
+    [idPlanilla, usuario], ["p_proc", "p_ben", "p_pag", "p_res"]
   );
   return {
-    jubilados: { procesados: toNum(outN.p_proc), excluidos: toNum(outN.p_excl), totalPagado: toNum(outN.p_pag), totalDescuentos: toNum(outN.p_desc) },
-    beneficiarios: { procesados: toNum(outB.b_proc), total: toNum(outB.b_tot), message: outB.b_res },
+    jubilados: { procesados: toNum(out.p_proc), totalPagado: toNum(out.p_pag) },
+    beneficiarios: { procesados: toNum(out.p_ben) },
+    message: out.p_res,
     estadoNuevo: "GENERADA"
   };
 };
@@ -71,8 +69,8 @@ const revertir = async (idPlanilla, motivo, currentUser) => {
   if (!motivo || String(motivo).trim() === "") throw createError("El motivo de reverso es obligatorio");
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Revirtiendo nomina jubilados", { idPlanilla, usuario });
-  await callSp("sp_reversar_planilla_pensionados(?, ?, ?)", [idPlanilla, usuario, motivo], []);
-  return { idPlanilla: Number(idPlanilla), estadoNuevo: "REVERSADA" };
+  const out = await callSp("sp_revertir_nomina_jubilados(?, ?, ?, @p_res)", [idPlanilla, usuario, motivo], ["p_res"]);
+  return { idPlanilla: Number(idPlanilla), estadoNuevo: "REVERSADA", message: out.p_res };
 };
 
 module.exports = { generarJubilados, generarAmparistas, revertir };
