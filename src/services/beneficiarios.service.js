@@ -178,9 +178,9 @@ const registrarLote = async (payload, currentUser) => {
       const [res] = await conn.execute(
         `INSERT INTO RPJ_MNT_BENEFICIARIO
            (ben_id_jubilado, ben_tipo_parentesco, ben_nombres, ben_apellidos, ben_dpi,
-            ben_fecha_nacimiento, ben_porcentaje, ben_telefono, ben_correo, ben_estado, ben_usuario_creacion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', ?)`,
-        [idJubilado, String(b.tipoParentesco).toUpperCase(), b.nombres || null, b.apellidos, String(b.dpi).trim(),
+            ben_fecha_nacimiento, ben_porcentaje, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?)`,
+        [idJubilado, String(b.tipoParentesco).toUpperCase(), b.nombres || "", b.apellidos, String(b.dpi).trim(),
          b.fechaNacimiento, toNum(b.porcentaje), b.telefono || null, b.correo || null, usuario]
       );
       const idBen = res.insertId;
@@ -190,7 +190,7 @@ const registrarLote = async (payload, currentUser) => {
           `INSERT INTO RPJ_MNT_TUTOR
              (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_usuario_creacion)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [idBen, t.nombres || null, t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null, usuario]
+          [idBen, t.nombres || "", t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null, usuario]
         );
       }
     }
@@ -227,7 +227,7 @@ const registrarTutor = async (payload, currentUser) => {
     `INSERT INTO RPJ_MNT_TUTOR
        (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_usuario_creacion)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [payload.idBeneficiario, payload.nombres || null, payload.apellidos, String(payload.dpi).trim(),
+    [payload.idBeneficiario, payload.nombres || "", payload.apellidos, String(payload.dpi).trim(),
      payload.parentesco || null, payload.telefono || null, usuario]
   );
   return { id: res.insertId };
