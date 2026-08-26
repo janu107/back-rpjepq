@@ -34,6 +34,7 @@ const amparistasRoutes = require("./amparistas.routes");
 const conveniosRoutes = require("./convenios.routes");
 const nominasJubiladosRoutes = require("./nominasJubilados.routes");
 const reportesJubiladosRoutes = require("./reportesJubilados.routes");
+const prestacionesRoutes = require("./prestaciones.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = Router();
@@ -62,6 +63,7 @@ router.use("/tiempo-extra", tiempoExtraRoutes);
 router.use("/dietas", dietasRoutes);
 router.use("/sesiones", sesionesRoutes);
 router.use("/nomina-tiempo-extra", nominaTiempoExtraRoutes);
+router.use("/prestaciones", prestacionesRoutes);
 router.use("/otros-descuentos", otrosDescuentosRoutes);
 router.use("/nomina", nominaRoutes);
 router.use("/generacion-planilla", generacionPlanillaRoutes);
