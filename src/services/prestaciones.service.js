@@ -50,6 +50,15 @@ const getTipo = (tipo) => {
   return config;
 };
 
+// Nombre legible a partir del id numérico de tipo de planilla (5/7/9). No se usa
+// RPJ_CAT_TIPO_PLANILLA.tpl_tipo_planilla para esto: en producción esa columna
+// guarda una bandera ("1"), no el nombre — el nombre real está en tpl_descripcion,
+// y su formato varía por ambiente. Usar el nombre fijo del módulo es más robusto.
+const NOMBRE_POR_TIPO = Object.fromEntries(
+  Object.values(PRESTACIONES).map((c) => [c.tipoPlanilla, c.nombre])
+);
+const nombreDeTipo = (tipoPlanilla) => NOMBRE_POR_TIPO[Number(tipoPlanilla)] || null;
+
 // Períodos legales. Bono 14: 01/07/(año-1) al 30/06/(año) (Decreto 42-92).
 // Aguinaldo: 01/12/(año-1) al 30/11/(año) (Decreto 76-78). El SP recalcula el
 // período internamente; esto es sólo para la pantalla y la validación previa.
@@ -63,7 +72,7 @@ const periodoDe = (tipo, anio) => {
 const mapPlanilla = (r) => ({
   id: r.id,
   tipoPlanilla: r.tipo_planilla,
-  tipoPlanillaNombre: r.tipo_planilla_nombre,
+  tipoPlanillaNombre: nombreDeTipo(r.tipo_planilla) || r.tipo_planilla_nombre,
   numero: r.numero,
   fechaInicio: r.fecha_inicio,
   fechaFinal: r.fecha_final,
