@@ -47,7 +47,7 @@ const mapBeneficiario = (b) => ({
 // ---------------------------------------------------------------------------
 const buscarJubilados = async (q) => {
   const term = String(q || "").trim();
-  if (term.length < 3) return [];
+  if (term.length < (/^\d+$/.test(term) ? 1 : 3)) return [];
   const like = `%${term}%`;
   const [rows] = await pool.execute(
     `SELECT jub_correlativo AS id, jub_id AS idJubilado, jub_dpi AS dpi,
@@ -55,11 +55,11 @@ const buscarJubilados = async (q) => {
             jub_estado AS estado, jub_tipo_pago AS tipoPago, jub_estado_pago AS estadoPago
        FROM RPJ_MNT_JUBILADO
       WHERE jub_estado = 'ACTIVO'
-        AND (jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ?
+        AND (jub_id LIKE ? OR jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ?
              OR CONCAT(jub_nombres, ' ', jub_apellidos) LIKE ?)
       ORDER BY jub_nombres, jub_apellidos
       LIMIT 20`,
-    [like, like, like, like]
+    [like, like, like, like, like]
   );
   return rows;
 };
@@ -239,14 +239,20 @@ const registrarTutor = async (payload, currentUser) => {
 const listarPorEstado = async (estado, q) => {
   const term = String(q || "").trim();
   const like = `%${term}%`;
-  const filtroQ = term ? " AND (b.ben_nombres LIKE ? OR b.ben_apellidos LIKE ? OR b.ben_dpi LIKE ?)" : "";
-  const params = term ? [estado, like, like, like] : [estado];
+  // Se busca por código del beneficiario, sus datos, y también por código o
+  // nombre del jubilado titular (así se puede llegar por el expediente del jubilado).
+  const filtroQ = term
+    ? ` AND (b.ben_correlativo LIKE ? OR b.ben_nombres LIKE ? OR b.ben_apellidos LIKE ? OR b.ben_dpi LIKE ?
+             OR j.jub_id LIKE ? OR CONCAT(j.jub_nombres, ' ', j.jub_apellidos) LIKE ?)`
+    : "";
+  const params = term ? [estado, like, like, like, like, like, like] : [estado];
   const [rows] = await pool.query(
     `SELECT b.ben_correlativo AS id, b.ben_id_jubilado AS idJubilado, b.ben_tipo_parentesco AS tipoParentesco,
             b.ben_nombres AS nombres, b.ben_apellidos AS apellidos, b.ben_dpi AS dpi,
             b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje,
             b.ben_telefono AS telefono, b.ben_correo AS correo, b.ben_estado AS estado,
             b.ben_empleador_estatal AS empleadorEstatal, b.ben_fecha_inicio_empleo AS fechaInicioEmpleo,
+            j.jub_id AS codigoJubilado,
             CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS jubiladoNombre
        FROM RPJ_MNT_BENEFICIARIO b
        INNER JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = b.ben_id_jubilado
@@ -254,7 +260,7 @@ const listarPorEstado = async (estado, q) => {
       ORDER BY b.ben_apellidos, b.ben_nombres`,
     params
   );
-  return rows.map((r) => ({ ...mapBeneficiario(r), jubiladoNombre: r.jubiladoNombre }));
+  return rows.map((r) => ({ ...mapBeneficiario(r), jubiladoNombre: r.jubiladoNombre, codigoJubilado: r.codigoJubilado }));
 };
 
 const getActivos = (q) => listarPorEstado("ACTIVO", q);

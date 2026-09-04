@@ -36,12 +36,16 @@ const SELECT_JUB = `SELECT jub_correlativo AS id, jub_id AS idJubilado, jub_dpi 
   jub_estado AS estado, jub_tipo_pago AS tipoPago, jub_estado_pago AS estadoPago
   FROM RPJ_MNT_JUBILADO`;
 
+// Un término puramente numérico se admite desde 1 carácter: es una búsqueda por
+// código (jub_id). Para texto se mantiene el mínimo de 3 para no traer media tabla.
+const minimoTermino = (term) => (/^\d+$/.test(term) ? 1 : 3);
+
 const buscar = async (q, estado) => {
   const term = String(q || "").trim();
-  if (term.length < 3) return [];
+  if (term.length < minimoTermino(term)) return [];
   const like = `%${term}%`;
-  const cond = ["(jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ? OR CONCAT(jub_nombres,' ',jub_apellidos) LIKE ?)"];
-  const params = [like, like, like, like];
+  const cond = ["(jub_id LIKE ? OR jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ? OR CONCAT(jub_nombres,' ',jub_apellidos) LIKE ?)"];
+  const params = [like, like, like, like, like];
   if (estado) { cond.push("jub_estado = ?"); params.push(String(estado).toUpperCase()); }
   const [rows] = await pool.query(`${SELECT_JUB} WHERE ${cond.join(" AND ")} ORDER BY jub_nombres, jub_apellidos LIMIT 20`, params);
   return rows.map(mapJubBusqueda);
@@ -50,8 +54,8 @@ const buscar = async (q, estado) => {
 const noAmparistas = async (q) => {
   const term = String(q || "").trim();
   const like = `%${term}%`;
-  const filtro = term ? " AND (jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ?)" : "";
-  const params = term ? [like, like, like] : [];
+  const filtro = term ? " AND (jub_id LIKE ? OR jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ?)" : "";
+  const params = term ? [like, like, like, like] : [];
   const [rows] = await pool.query(
     `${SELECT_JUB} WHERE jub_estado = 'ACTIVO' AND jub_tipo_pago = 'NORMAL'
        AND jub_correlativo NOT IN (SELECT jui_id_jubilado FROM RPJ_MNT_JUICIO WHERE jui_estado = 'VIGENTE')

@@ -15,11 +15,13 @@ const toNum = (v) => Number(v || 0);
 const candidatos = async (q) => {
   const term = String(q || "").trim();
   const like = `%${term}%`;
-  const fj = term ? " AND (j.jub_nombres LIKE ? OR j.jub_apellidos LIKE ? OR j.jub_dpi LIKE ?)" : "";
-  const fb = term ? " AND (b.ben_nombres LIKE ? OR b.ben_apellidos LIKE ? OR b.ben_dpi LIKE ?)" : "";
-  const pj = term ? [like, like, like] : [];
+  // Se admite buscar por código además de nombre y DPI.
+  const fj = term ? " AND (j.jub_id LIKE ? OR j.jub_nombres LIKE ? OR j.jub_apellidos LIKE ? OR j.jub_dpi LIKE ?)" : "";
+  const fb = term ? " AND (b.ben_correlativo LIKE ? OR b.ben_nombres LIKE ? OR b.ben_apellidos LIKE ? OR b.ben_dpi LIKE ?)" : "";
+  const pj = term ? [like, like, like, like] : [];
   const [jubs] = await pool.query(
-    `SELECT 'jubilado' AS tipo, j.jub_correlativo AS id, CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre,
+    `SELECT 'jubilado' AS tipo, j.jub_correlativo AS id, j.jub_id AS codigo,
+            CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre,
             j.jub_dpi AS dpi, SUM(d.deu_saldo) AS saldo
        FROM RPJ_MNT_JUBILADO j
        INNER JOIN RPJ_MNT_DEUDA d ON d.deu_id_jubilado = j.jub_correlativo AND d.deu_id_beneficiario IS NULL
@@ -27,14 +29,15 @@ const candidatos = async (q) => {
       GROUP BY j.jub_correlativo HAVING saldo > 0 ORDER BY nombre LIMIT 20`, pj
   );
   const [bens] = await pool.query(
-    `SELECT 'beneficiario' AS tipo, b.ben_correlativo AS id, CONCAT(b.ben_nombres,' ',b.ben_apellidos) AS nombre,
+    `SELECT 'beneficiario' AS tipo, b.ben_correlativo AS id, b.ben_correlativo AS codigo,
+            CONCAT(b.ben_nombres,' ',b.ben_apellidos) AS nombre,
             b.ben_dpi AS dpi, SUM(d.deu_saldo) AS saldo
        FROM RPJ_MNT_BENEFICIARIO b
        INNER JOIN RPJ_MNT_DEUDA d ON d.deu_id_beneficiario = b.ben_correlativo
       WHERE d.deu_es_deuda = 1 AND d.deu_estado IN ('PENDIENTE','PARCIAL')${fb}
       GROUP BY b.ben_correlativo HAVING saldo > 0 ORDER BY nombre LIMIT 20`, pj
   );
-  return [...jubs, ...bens].map((r) => ({ tipo: r.tipo, id: r.id, nombre: r.nombre, dpi: r.dpi, saldo: toNum(r.saldo) }));
+  return [...jubs, ...bens].map((r) => ({ tipo: r.tipo, id: r.id, codigo: r.codigo, nombre: r.nombre, dpi: r.dpi, saldo: toNum(r.saldo) }));
 };
 
 const deudaPorPersona = async (tipo, id) => {
