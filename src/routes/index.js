@@ -36,6 +36,7 @@ const nominasJubiladosRoutes = require("./nominasJubilados.routes");
 const reportesJubiladosRoutes = require("./reportesJubilados.routes");
 const prestacionesRoutes = require("./prestaciones.routes");
 const prestacionesJubiladosRoutes = require("./prestacionesJubilados.routes");
+const impresionesRoutes = require("./impresiones.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = Router();
@@ -66,6 +67,7 @@ router.use("/sesiones", sesionesRoutes);
 router.use("/nomina-tiempo-extra", nominaTiempoExtraRoutes);
 router.use("/prestaciones", prestacionesRoutes);
 router.use("/prestaciones-jubilados", prestacionesJubiladosRoutes);
+router.use("/impresiones", impresionesRoutes);
 router.use("/otros-descuentos", otrosDescuentosRoutes);
 router.use("/nomina", nominaRoutes);
 router.use("/generacion-planilla", generacionPlanillaRoutes);
