@@ -16,7 +16,9 @@ const MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
   "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
 
 const num = (v) => Number(v || 0);
-const q = (v) => num(v).toFixed(2);
+// Montos con separador de millares: 141,241.29. Es el formato de los machotes
+// impresos, y a partir de cierta cifra sin separador la columna es ilegible.
+const q = (v) => num(v).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fecha = (v) => (v ? dayjs(v).format("DD/MM/YYYY") : "");
 const fechaLarga = (v) => {
   const d = v ? dayjs(v) : dayjs();
