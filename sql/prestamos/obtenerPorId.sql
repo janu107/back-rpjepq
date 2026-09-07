@@ -13,6 +13,7 @@ SELECT
   p.pre_fecha_creacion,
   p.pre_usuario_creacion,
   a.apo_tipo_manejo,
+  a.apo_id,
   a.apo_nombre,
   a.apo_apellido,
   a.apo_dpi

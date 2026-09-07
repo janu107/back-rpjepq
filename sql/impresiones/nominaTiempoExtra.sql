@@ -2,13 +2,13 @@
 -- En los renglones de tiempo extra: nin_dias_trabajados = cantidad de horas y
 -- nin_valor_teorico = valor de la hora extra (salario/30/8 x multiplicador).
 -- El salario mensual se toma de RPJ_MNT_SALARIO, no del renglón.
+-- El área se agrega después con areasPorEmpleado.sql (ver ese archivo).
 -- Params: [idPlanilla, idPlanilla].
 SELECT
   e.emp_correlativo                           AS id_empleado,
   e.emp_id                                    AS codigo,
   CONCAT(e.emp_nombres, ' ', e.emp_apellidos) AS nombre,
-  COALESCE(ar.are_descripcion, 'SIN AREA')    AS area,
-  COALESCE(pu.pue_nombre, ing.puesto, e.emp_profesion_oficio) AS cargo,
+  COALESCE(ing.puesto, e.emp_profesion_oficio) AS cargo,
   COALESCE(sal.salario, 0)                    AS salario_mensual,
   COALESCE(ing.valor_hora_normal, 0)          AS valor_hora_normal,
   COALESCE(ing.horas_normales, 0)             AS horas_normales,
@@ -51,6 +51,4 @@ LEFT JOIN (
        SELECT MIN(s2.sal_correlativo) FROM RPJ_MNT_SALARIO s2
         WHERE s2.sal_id_empleado = s.sal_id_empleado AND s2.sal_tipo_manejo = 1)
 ) sal ON sal.sal_id_empleado = e.emp_correlativo
-LEFT JOIN RPJ_CAT_PUESTO pu ON pu.pue_id = e.emp_id_puesto
-LEFT JOIN RPJ_CAT_AREA   ar ON ar.are_id = pu.pue_id_area
-ORDER BY area, e.emp_apellidos, e.emp_nombres;
+ORDER BY e.emp_apellidos, e.emp_nombres;

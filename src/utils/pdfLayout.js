@@ -44,8 +44,9 @@ const repartirAnchos = (doc, pesos) => {
 };
 
 const encabezado = (doc, { titulo, subtitulo, lineas = [] }) => {
-  doc.font("Helvetica-Bold").fontSize(12).text("ASOCIACION DEL REGIMEN DE PREVISION SOCIAL", { align: "center" });
-  doc.fontSize(10).text("EMPRESA PORTUARIA QUETZAL", { align: "center" });
+  // Nombre institucional, igual al que ya usan los reportes en pantalla.
+  doc.font("Helvetica-Bold").fontSize(12).text("REGIMEN DE PENSIONES Y JUBILACIONES", { align: "center" });
+  doc.fontSize(10).text("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", { align: "center" });
   doc.moveDown(0.25).fontSize(10).text(String(titulo || "").toUpperCase(), { align: "center" });
   if (subtitulo) doc.font("Helvetica").fontSize(8).text(subtitulo, { align: "center" });
   if (lineas.length) {

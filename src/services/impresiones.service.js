@@ -29,15 +29,45 @@ const createError = (message, status = 400) => {
 
 const sumar = (filas, campo) => filas.reduce((s, f) => s + num(f[campo]), 0);
 
-// Agrupa conservando el orden en que vienen (la consulta ya ordena por área).
+const SIN_AREA = "SIN AREA";
+
+// Mapa idEmpleado -> { area, puesto }.
+//
+// Se consulta aparte de los reportes a propósito: el catálogo de áreas y puestos
+// puede no estar poblado (o no existir) en un ambiente, y en ese caso el reporte
+// debe salir igual con todos bajo "SIN AREA" en lugar de fallar entero. Por eso
+// el catch: se registra el motivo y se sigue.
+const getMapaAreas = async () => {
+  try {
+    const [rows] = await pool.execute(sql("areasPorEmpleado"));
+    return new Map(rows.map((r) => [Number(r.id_empleado), { area: r.area || SIN_AREA, puesto: r.puesto }]));
+  } catch (error) {
+    logger.warn("No se pudo leer el catálogo de áreas/puestos; las impresiones se agruparán bajo SIN AREA", {
+      code: error.code, sqlMessage: error.sqlMessage, message: error.message
+    });
+    return new Map();
+  }
+};
+
+// Adjunta área y cargo a cada fila usando el mapa.
+const conArea = (filas, mapa) => filas.map((f) => {
+  const info = mapa.get(Number(f.id_empleado));
+  return { ...f, area: info?.area || SIN_AREA, cargo: f.cargo || info?.puesto || "" };
+});
+
+// Agrupa por área, en orden alfabético y dejando "SIN AREA" de último.
 const agruparPorArea = (filas) => {
   const mapa = new Map();
   filas.forEach((f) => {
-    const clave = f.area || "SIN AREA";
+    const clave = f.area || SIN_AREA;
     if (!mapa.has(clave)) mapa.set(clave, []);
     mapa.get(clave).push(f);
   });
-  return [...mapa.entries()];
+  return [...mapa.entries()].sort(([a], [b]) => {
+    if (a === SIN_AREA) return 1;
+    if (b === SIN_AREA) return -1;
+    return a.localeCompare(b);
+  });
 };
 
 // Las firmas llegan desde la pantalla como JSON; el sistema no codifica personas.
@@ -112,8 +142,11 @@ const totalesSueldos = (filas) => ({
 
 const getNominaSueldos = async (idPlanilla) => {
   const planilla = await getPlanilla(idPlanilla);
-  const [rows] = await pool.execute(sql("nominaSueldos"), [idPlanilla, idPlanilla]);
-  return { planilla, filas: rows };
+  const [[rows], mapaAreas] = await Promise.all([
+    pool.execute(sql("nominaSueldos"), [idPlanilla, idPlanilla]),
+    getMapaAreas()
+  ]);
+  return { planilla, filas: conArea(rows, mapaAreas) };
 };
 
 const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
@@ -193,8 +226,11 @@ const totalesExtra = (filas) => ({
 
 const getNominaTiempoExtra = async (idPlanilla) => {
   const planilla = await getPlanilla(idPlanilla);
-  const [rows] = await pool.execute(sql("nominaTiempoExtra"), [idPlanilla, idPlanilla]);
-  return { planilla, filas: rows };
+  const [[rows], mapaAreas] = await Promise.all([
+    pool.execute(sql("nominaTiempoExtra"), [idPlanilla, idPlanilla]),
+    getMapaAreas()
+  ]);
+  return { planilla, filas: conArea(rows, mapaAreas) };
 };
 
 const pdfNominaTiempoExtra = async (idPlanilla, opciones = {}, user) => {
@@ -328,8 +364,41 @@ const getResumen = async ({ tipoManejo, desde, hasta }) => {
   if (![1, 2].includes(manejo)) throw createError("El tipo de manejo debe ser 1 (régimen) o 2 (jubilados)");
   if (!desde || !hasta) throw createError("Debe indicar el rango de fechas de pago");
 
-  const [areas] = await pool.query(sql("resumenPorArea"), [manejo, manejo, desde, hasta]);
-  const [conceptos] = await pool.query(sql("resumenPorConcepto"), [manejo, desde, hasta]);
+  const [[personas], [conceptos], mapaAreas] = await Promise.all([
+    pool.query(sql("resumenPorPersona"), [manejo, desde, hasta]),
+    pool.query(sql("resumenPorConcepto"), [manejo, desde, hasta]),
+    manejo === 1 ? getMapaAreas() : Promise.resolve(new Map())
+  ]);
+
+  // Los jubilados no tienen puesto ni área: van todos bajo una sola etiqueta.
+  const areaDe = (fila) => (manejo === 2
+    ? "JUBILADOS"
+    : (mapaAreas.get(Number(fila.id_empleado))?.area || SIN_AREA));
+
+  const acumulado = new Map();
+  personas.forEach((fila) => {
+    const clave = areaDe(fila);
+    if (!acumulado.has(clave)) acumulado.set(clave, { area: clave, personas: new Set(), nominal: 0, descuentos: 0 });
+    const grupo = acumulado.get(clave);
+    grupo.personas.add(Number(fila.persona));
+    grupo.nominal += num(fila.nominal);
+    grupo.descuentos += num(fila.descuentos);
+  });
+
+  const areas = [...acumulado.values()]
+    .map((g) => ({
+      area: g.area,
+      personas: g.personas.size,
+      nominal: g.nominal,
+      descuentos: g.descuentos,
+      liquido: g.nominal - g.descuentos
+    }))
+    .sort((a, b) => {
+      if (a.area === SIN_AREA) return 1;
+      if (b.area === SIN_AREA) return -1;
+      return a.area.localeCompare(b.area);
+    });
+
   return { tipoManejo: manejo, desde, hasta, areas, conceptos };
 };
 

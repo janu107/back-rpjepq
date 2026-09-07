@@ -1,16 +1,15 @@
--- Impresión de nómina de sueldos (empleados de régimen), agrupable por área.
--- El área NO viene del renglón de nómina (nin_area guarda la constante
--- 'TRABAJADORES'): se resuelve por el puesto del empleado
--- (RPJ_MNT_EMPLEADO -> RPJ_CAT_PUESTO -> RPJ_CAT_AREA).
+-- Impresión de nómina de sueldos (empleados de régimen).
+-- El área NO se resuelve aquí: se agrega después con areasPorEmpleado.sql, para
+-- que un catálogo de áreas incompleto no tumbe el reporte completo.
 -- Ingresos y descuentos se agregan por separado para no multiplicar renglones.
 -- Params: [idPlanilla, idPlanilla].
 SELECT
   e.emp_correlativo                              AS id_empleado,
   e.emp_id                                       AS codigo,
   CONCAT(e.emp_nombres, ' ', e.emp_apellidos)    AS nombre,
-  COALESCE(ar.are_descripcion, 'SIN AREA')       AS area,
+  e.emp_apellidos                                AS apellidos,
   e.emp_fecha_ingreso                            AS fecha_inicio_labor,
-  COALESCE(pu.pue_nombre, ing.puesto, e.emp_profesion_oficio) AS cargo,
+  COALESCE(ing.puesto, e.emp_profesion_oficio)   AS cargo,
   COALESCE(ing.dias, 0)                          AS dias,
   COALESCE(ing.sueldo, 0)                        AS sueldo,
   COALESCE(ing.bonif_incentivo, 0)               AS bonif_incentivo,
@@ -48,7 +47,4 @@ LEFT JOIN (
    WHERE nde_id_planilla = ? AND nde_id_empleado IS NOT NULL
    GROUP BY nde_id_empleado
 ) des ON des.nde_id_empleado = e.emp_correlativo
-LEFT JOIN RPJ_CAT_PUESTO pu ON pu.pue_id = e.emp_id_puesto
-LEFT JOIN RPJ_CAT_AREA   ar ON ar.are_id = pu.pue_id_area
-
-ORDER BY area, e.emp_apellidos, e.emp_nombres;
+ORDER BY e.emp_apellidos, e.emp_nombres;
