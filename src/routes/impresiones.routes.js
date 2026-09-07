@@ -14,6 +14,7 @@ router.get("/nomina-sueldos/:idPlanilla", controller.previewNominaSueldos);
 router.get("/nomina-tiempo-extra/:idPlanilla", controller.previewNominaTiempoExtra);
 router.get("/prestamo/:idPrestamo/estado-cuenta", controller.previewEstadoCuenta);
 router.get("/resumen", controller.previewResumen);
+router.get("/aportaciones/:idAportacion/estado-cuenta", controller.previewEstadoAportaciones);
 router.get("/nomina-prestamos", controller.previewNominaPrestamos);
 
 // --- Impresiones PDF ---------------------------------------------------------
@@ -28,6 +29,10 @@ router.get("/nomina-tiempo-extra/:idPlanilla/pdf",
 router.get("/prestamo/:idPrestamo/estado-cuenta/pdf",
   auditAction("IMPRESIONES", "ESTADO_CUENTA_PRESTAMO_PDF", (req) => `Imprimir estado de cuenta del préstamo ${req.params.idPrestamo}`),
   controller.pdfEstadoCuenta);
+
+router.get("/aportaciones/:idAportacion/estado-cuenta/pdf",
+  auditAction("IMPRESIONES", "ESTADO_APORTACIONES_PDF", (req) => `Imprimir estado de cuenta de aportaciones ${req.params.idAportacion}`),
+  controller.pdfEstadoAportaciones);
 
 router.get("/resumen/pdf",
   auditAction("IMPRESIONES", "RESUMEN_PDF", (req) => `Imprimir resumen (manejo ${req.query?.tipoManejo}) del ${req.query?.desde} al ${req.query?.hasta}`),

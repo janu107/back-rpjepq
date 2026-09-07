@@ -357,6 +357,74 @@ const pdfEstadoCuentaPrestamo = async (idPrestamo, opciones = {}, user) => {
 };
 
 // ---------------------------------------------------------------------------
+// Estado de cuenta de aportaciones de un empleado EPQ (carta vertical).
+// Se genera aquí, en el servidor, en vez de imprimir la pantalla: el diálogo
+// del navegador agrega sus propios márgenes y encabezados, y el resultado no
+// coincidía con el resto de las impresiones.
+// ---------------------------------------------------------------------------
+const getEstadoAportaciones = async (idAportacion) => {
+  const [cab] = await pool.execute(sql("aportacionesCabecera"), [idAportacion]);
+  if (!cab[0]) throw createError("Empleado EPQ no encontrado", 404);
+  const [mov] = await pool.execute(sql("aportacionesDetalle"), [idAportacion]);
+  return { empleado: cab[0], movimientos: mov };
+};
+
+const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
+  const { empleado, movimientos } = await getEstadoAportaciones(idAportacion);
+  const total = sumar(movimientos, "monto");
+
+  const doc = pdf.nuevoDoc(pdf.CARTA);
+  const cabecera = (d) => pdf.encabezado(d, { titulo: "ESTADO DE CUENTA DE APORTACIONES" });
+  cabecera(doc);
+
+  // Ficha del empleado: código, nombre, área, total y cantidad de aportes.
+  // El nombre va en su propio renglón a todo el ancho: en dos columnas, un
+  // nombre completo se desbordaba encima de la fila siguiente.
+  const ancho = pdf.anchoUtil(doc);
+  const media = ancho / 2;
+  const x0 = doc.page.margins.left;
+
+  const par = (etiqueta, valor, x, y, anchoTotal) => {
+    const anchoEtiqueta = Math.min(110, anchoTotal * 0.45);
+    doc.font("Helvetica-Bold").fontSize(8).text(etiqueta, x, y, { width: anchoEtiqueta, lineBreak: false });
+    doc.font("Helvetica").fontSize(8).text(String(valor ?? "—"), x + anchoEtiqueta + 4, y,
+      { width: anchoTotal - anchoEtiqueta - 4, lineBreak: false, ellipsis: true });
+  };
+
+  let y = doc.y;
+  par("NOMBRE:", empleado.nombre || "—", x0, y, ancho);
+  y += 13;
+  par("CODIGO:", empleado.codigo ?? "—", x0, y, media - 8);
+  par("TOTAL APORTADO:", `Q ${q(total)}`, x0 + media, y, media);
+  y += 13;
+  par("AREA / GERENCIA:", empleado.area || "—", x0, y, media - 8);
+  par("CANTIDAD DE APORTES:", String(movimientos.length), x0 + media, y, media);
+  y += 13;
+  par("ESTADO:", empleado.estado || "—", x0, y, media - 8);
+  doc.y = y + 20;
+  doc.x = x0;
+
+  const anchos = pdf.repartirAnchos(doc, [15, 45, 40]);
+  const columnas = [
+    { titulo: "No.", campo: "no", align: "right", ancho: anchos[0] },
+    { titulo: "FECHA DE PAGO", campo: "fecha_pago", align: "center", ancho: anchos[1], valor: (f) => fecha(f.fecha_pago) },
+    { titulo: "MONTO", campo: "monto", align: "right", ancho: anchos[2], valor: (f) => `Q ${q(f.monto)}` }
+  ];
+
+  if (!movimientos.length) {
+    doc.font("Helvetica-Oblique").fontSize(8).text("El empleado no tiene aportaciones registradas.");
+  } else {
+    pdf.dibujarTabla(doc, columnas, movimientos.map((m, i) => ({ ...m, no: i + 1 })),
+      { fuente: 7.5, alturaFila: 13, reservaInferior: 40, alRepetirEncabezado: cabecera });
+    pdf.filaTotales(doc, columnas, { monto: `Q ${q(total)}` }, `TOTAL (${movimientos.length} aportes)`, 2);
+  }
+
+  pdf.pieDePagina(doc, user?.usuario);
+  logger.info("Impresión de estado de cuenta de aportaciones", { idAportacion, movimientos: movimientos.length, usuario: user?.usuario });
+  return { buffer: await pdf.aBuffer(doc), filename: `aportaciones_${empleado.codigo || idAportacion}.pdf` };
+};
+
+// ---------------------------------------------------------------------------
 // 17. Resumen por área y por concepto (carta vertical)
 // ---------------------------------------------------------------------------
 const getResumen = async ({ tipoManejo, desde, hasta }) => {
@@ -523,6 +591,8 @@ const pdfNominaPrestamos = async (query, user) => {
 };
 
 module.exports = {
+  getEstadoAportaciones,
+  pdfEstadoAportaciones,
   getNominaSueldos,
   pdfNominaSueldos,
   getNominaTiempoExtra,
