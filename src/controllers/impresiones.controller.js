@@ -14,6 +14,8 @@ const previewNominaTiempoExtra = async (req, res, next) => { try { return succes
 const previewEstadoCuenta = async (req, res, next) => { try { return successResponse(res, await service.getEstadoCuentaPrestamo(req.params.idPrestamo), "Estado de cuenta obtenido correctamente"); } catch (e) { next(e); } };
 const previewResumen = async (req, res, next) => { try { return successResponse(res, await service.getResumen(req.query), "Resumen obtenido correctamente"); } catch (e) { next(e); } };
 const previewEstadoAportaciones = async (req, res, next) => { try { return successResponse(res, await service.getEstadoAportaciones(req.params.idAportacion), "Estado de aportaciones obtenido correctamente"); } catch (e) { next(e); } };
+const previewNominaJubilados = async (req, res, next) => { try { return successResponse(res, await service.getNominaJubilados(req.params.idPlanilla, req.query), "Nómina de jubilados obtenida correctamente"); } catch (e) { next(e); } };
+const previewResumenJubilados = async (req, res, next) => { try { return successResponse(res, await service.getResumenJubilados(req.params.idPlanilla), "Resumen de jubilados obtenido correctamente"); } catch (e) { next(e); } };
 const previewNominaPrestamos = async (req, res, next) => { try { return successResponse(res, await service.getNominaPrestamos(req.query), "Nómina de préstamos obtenida correctamente"); } catch (e) { next(e); } };
 
 // --- Impresiones PDF ---------------------------------------------------------
@@ -22,11 +24,13 @@ const pdfNominaTiempoExtra = async (req, res, next) => { try { return enviarPdf(
 const pdfEstadoCuenta = async (req, res, next) => { try { return enviarPdf(res, await service.pdfEstadoCuentaPrestamo(req.params.idPrestamo, req.query, req.user)); } catch (e) { next(e); } };
 const pdfResumen = async (req, res, next) => { try { return enviarPdf(res, await service.pdfResumen(req.query, req.user)); } catch (e) { next(e); } };
 const pdfEstadoAportaciones = async (req, res, next) => { try { return enviarPdf(res, await service.pdfEstadoAportaciones(req.params.idAportacion, req.query, req.user)); } catch (e) { next(e); } };
+const pdfNominaJubilados = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaJubilados(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
+const pdfResumenJubilados = async (req, res, next) => { try { return enviarPdf(res, await service.pdfResumenJubilados(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
 const pdfNominaPrestamos = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaPrestamos(req.query, req.user)); } catch (e) { next(e); } };
 
 module.exports = {
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,
-  previewEstadoAportaciones,
+  previewEstadoAportaciones, previewNominaJubilados, previewResumenJubilados,
   pdfNominaSueldos, pdfNominaTiempoExtra, pdfEstadoCuenta, pdfResumen, pdfNominaPrestamos,
-  pdfEstadoAportaciones
+  pdfEstadoAportaciones, pdfNominaJubilados, pdfResumenJubilados
 };

@@ -9,6 +9,8 @@ SELECT
   d.dat_tipo_cuenta,
   d.dat_aplica_desc_igss,
   d.dat_aplica_desc_isr,
+  d.dat_aplica_intecap,
+  d.dat_aplica_dasociacion,
   d.dat_aplica_seguro,
   d.dat_no_probidad,
   d.dat_no_sobrevivencia,

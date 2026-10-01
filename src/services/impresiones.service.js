@@ -590,7 +590,195 @@ const pdfNominaPrestamos = async (query, user) => {
   return { buffer: await pdf.aBuffer(doc), filename: `nomina_prestamos_${query.desde}_${query.hasta}.pdf` };
 };
 
+// ---------------------------------------------------------------------------
+// Nómina de jubilados (oficio, agrupada por tipo de jubilación)
+//
+// NOTA sobre los descuentos: el formato impreso trae una columna "D. SEGURO"
+// que aquí no se incluye, porque RPJ_CAT_TIPO_DESCUENTO no tiene un tipo de
+// seguro (existe la bandera dat_aplica_seguro en datos de planilla, pero ningún
+// SP genera ese renglón). Mientras no exista el tipo, la columna saldría en cero.
+// ---------------------------------------------------------------------------
+const getNominaJubilados = async (idPlanilla, opciones = {}) => {
+  const planilla = await getPlanilla(idPlanilla);
+  const [rows] = await pool.execute(sql("nominaJubilados"), [idPlanilla, idPlanilla]);
+  const tipo = String(opciones.tipoJubilacion || "").trim().toUpperCase();
+  const filas = tipo ? rows.filter((r) => String(r.tipo_jubilacion).toUpperCase() === tipo) : rows;
+  return { planilla, filas, tipoJubilacion: tipo || null };
+};
+
+const COLS_JUBILADOS = (doc) => {
+  const anchos = pdf.repartirAnchos(doc, [5, 24, 12, 9, 10, 8, 9, 8, 9, 9, 8, 11]);
+  const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
+  return [
+    c("COD", "codigo", "right", 0),
+    c("NOMBRE", "nombre", "left", 1),
+    c("PENSION", "tipo_jubilacion", "left", 2),
+    c("FECHA", "fecha_jubilacion", "center", 3, (f) => fecha(f.fecha_jubilacion)),
+    c("P. MENSUAL", "pension_mensual", "right", 4, (f) => q(f.pension_mensual)),
+    c("DESC. ASOC.", "desc_asociacion", "right", 5, (f) => q(f.desc_asociacion)),
+    c("DESC. PREST.", "desc_prestamos", "right", 6, (f) => q(f.desc_prestamos)),
+    c("D. JUDICIAL", "desc_judicial", "right", 7, (f) => q(f.desc_judicial)),
+    c("D. BANRURAL", "desc_banrural", "right", 8, (f) => q(f.desc_banrural)),
+    c("D. BANTRAB", "desc_bantrab", "right", 9, (f) => q(f.desc_bantrab)),
+    // IGSS, ISR e INTECAP van juntos: sin esta columna la fila no cuadraba
+    // (P. MENSUAL menos los descuentos visibles no daba el líquido).
+    c("OTROS DESC.", "desc_otros", "right", 10, (f) => q(f.desc_otros)),
+    c("LIQ. A RECIBIR", "liquido", "right", 11, (f) => q(f.liquido))
+  ];
+};
+
+const totalesJubilados = (filas) => ({
+  pension_mensual: q(sumar(filas, "pension_mensual")),
+  desc_asociacion: q(sumar(filas, "desc_asociacion")),
+  desc_prestamos: q(sumar(filas, "desc_prestamos")),
+  desc_judicial: q(sumar(filas, "desc_judicial")),
+  desc_banrural: q(sumar(filas, "desc_banrural")),
+  desc_bantrab: q(sumar(filas, "desc_bantrab")),
+  desc_otros: q(sumar(filas, "desc_otros")),
+  liquido: q(sumar(filas, "liquido"))
+});
+
+// Agrupa por tipo de jubilación, dejando "SIN CLASIFICAR" de último.
+const agruparPorTipoJubilacion = (filas) => {
+  const mapa = new Map();
+  filas.forEach((f) => {
+    const clave = f.tipo_jubilacion || "SIN CLASIFICAR";
+    if (!mapa.has(clave)) mapa.set(clave, []);
+    mapa.get(clave).push(f);
+  });
+  return [...mapa.entries()].sort(([a], [b]) => {
+    if (a === "SIN CLASIFICAR") return 1;
+    if (b === "SIN CLASIFICAR") return -1;
+    return a.localeCompare(b);
+  });
+};
+
+const pdfNominaJubilados = async (idPlanilla, opciones = {}, user) => {
+  const { planilla, filas, tipoJubilacion } = await getNominaJubilados(idPlanilla, opciones);
+  if (!filas.length) {
+    throw createError(
+      tipoJubilacion
+        ? `La planilla no tiene jubilados del tipo ${tipoJubilacion}`
+        : "La planilla no tiene renglones de jubilados para imprimir",
+      409
+    );
+  }
+
+  const firmas = parsearFirmas(opciones.firmas);
+  // Separar por tipo de jubilación es el modo normal; si ya se filtró por un
+  // tipo concreto, agrupar no aporta nada.
+  const porTipo = !tipoJubilacion && String(opciones.porTipo ?? "true") !== "false";
+  const doc = pdf.nuevoDoc(pdf.OFICIO);
+  const columnas = COLS_JUBILADOS(doc);
+
+  const cabecera = (d) => pdf.encabezado(d, {
+    titulo: "NOMINA DE JUBILADOS",
+    subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`,
+    lineas: [tipoJubilacion ? `Tipo de jubilación: ${tipoJubilacion}` : null]
+  });
+  cabecera(doc);
+
+  const grupos = porTipo ? agruparPorTipoJubilacion(filas) : [["", filas]];
+  grupos.forEach(([tipo, filasTipo], idx) => {
+    if (idx > 0) doc.moveDown(0.8);
+    if (porTipo) {
+      doc.font("Helvetica-Bold").fontSize(8).text(`PENSION: ${tipo}`);
+      doc.moveDown(0.15);
+    }
+    pdf.dibujarTabla(doc, columnas, filasTipo, { fuente: 6.2, alturaFila: 11, reservaInferior: 70, alRepetirEncabezado: cabecera });
+    pdf.filaTotales(doc, columnas, totalesJubilados(filasTipo), porTipo ? `TOTAL ${tipo}` : "TOTAL DE PENSIONES", 2);
+  });
+
+  if (porTipo && grupos.length > 1) {
+    doc.moveDown(0.4);
+    pdf.filaTotales(doc, columnas, totalesJubilados(filas), "TOTAL DE PENSIONES", 2);
+  }
+
+  cierreNomina(doc, { total: sumar(filas, "liquido"), fechaPago: planilla.fechaPago, firmas });
+  pdf.pieDePagina(doc, user?.usuario);
+
+  logger.info("Impresión de nómina de jubilados", { idPlanilla, jubilados: filas.length, tipoJubilacion, usuario: user?.usuario });
+  const sufijo = tipoJubilacion ? `_${tipoJubilacion.toLowerCase().replace(/\s+/g, "_")}` : "";
+  return { buffer: await pdf.aBuffer(doc), filename: `nomina_jubilados_${planilla.numero}${sufijo}.pdf` };
+};
+
+// ---------------------------------------------------------------------------
+// Resumen de nómina de jubilados (carta vertical): pensiones por tipo + remesas
+// ---------------------------------------------------------------------------
+const getResumenJubilados = async (idPlanilla) => {
+  const planilla = await getPlanilla(idPlanilla);
+  const [[pensiones], [remesas]] = await Promise.all([
+    pool.execute(sql("resumenJubiladosPensiones"), [idPlanilla, idPlanilla]),
+    pool.execute(sql("resumenJubiladosRemesas"), [idPlanilla])
+  ]);
+  return { planilla, pensiones, remesas };
+};
+
+const pdfResumenJubilados = async (idPlanilla, opciones = {}, user) => {
+  const { planilla, pensiones, remesas } = await getResumenJubilados(idPlanilla);
+  const doc = pdf.nuevoDoc(pdf.CARTA);
+
+  pdf.encabezado(doc, {
+    titulo: "RESUMEN DE NOMINA DE JUBILADOS",
+    subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}`,
+    lineas: [`Pago ${fecha(planilla.fechaPago)}   ·   Generado por ${user?.usuario || "sistema"}`]
+  });
+
+  // Bloque PENSIONES: nominal y líquido por tipo de jubilación.
+  doc.font("Helvetica-Bold").fontSize(9).text("PENSIONES");
+  doc.moveDown(0.2);
+  const anchosP = pdf.repartirAnchos(doc, [38, 14, 24, 24]);
+  const colsPensiones = [
+    { titulo: "TIPO DE JUBILACION", campo: "tipo_jubilacion", align: "left", ancho: anchosP[0] },
+    { titulo: "CANT.", campo: "cantidad", align: "right", ancho: anchosP[1] },
+    { titulo: "NOMINAL", campo: "nominal", align: "right", ancho: anchosP[2], valor: (f) => `Q ${q(f.nominal)}` },
+    { titulo: "LIQ. A RECIBIR", campo: "liquido", align: "right", ancho: anchosP[3], valor: (f) => `Q ${q(f.liquido)}` }
+  ];
+  if (pensiones.length) {
+    pdf.dibujarTabla(doc, colsPensiones, pensiones, { fuente: 8, alturaFila: 14 });
+    pdf.filaTotales(doc, colsPensiones, {
+      cantidad: String(pensiones.reduce((s, p) => s + num(p.cantidad), 0)),
+      nominal: `Q ${q(sumar(pensiones, "nominal"))}`,
+      liquido: `Q ${q(sumar(pensiones, "liquido"))}`
+    }, "TOTAL", 1);
+  } else {
+    doc.font("Helvetica-Oblique").fontSize(8).text("La planilla no tiene pensiones generadas.");
+  }
+
+  // Bloque REMESAS: a dónde se traslada lo descontado.
+  doc.moveDown(1);
+  doc.x = doc.page.margins.left;
+  doc.font("Helvetica-Bold").fontSize(9).text("REMESAS");
+  doc.moveDown(0.2);
+  const anchosR = pdf.repartirAnchos(doc, [52, 16, 32]);
+  const colsRemesas = [
+    { titulo: "CONCEPTO", campo: "concepto", align: "left", ancho: anchosR[0] },
+    { titulo: "CANT.", campo: "cantidad", align: "right", ancho: anchosR[1] },
+    { titulo: "MONTO", campo: "monto", align: "right", ancho: anchosR[2], valor: (f) => `Q ${q(f.monto)}` }
+  ];
+  if (remesas.length) {
+    pdf.dibujarTabla(doc, colsRemesas, remesas, { fuente: 8, alturaFila: 14 });
+    pdf.filaTotales(doc, colsRemesas, { monto: `Q ${q(sumar(remesas, "monto"))}` }, "TOTAL", 1);
+  } else {
+    doc.font("Helvetica-Oblique").fontSize(8).text("La planilla no tiene descuentos generados.");
+  }
+
+  // Lo que sale de caja: el líquido que reciben los jubilados más las remesas.
+  doc.moveDown(1);
+  doc.x = doc.page.margins.left;
+  const granTotal = sumar(pensiones, "liquido") + sumar(remesas, "monto");
+  doc.font("Helvetica-Bold").fontSize(9).text(`TOTAL GENERAL: Q ${q(granTotal)}`, { align: "right" });
+
+  pdf.pieDePagina(doc, user?.usuario);
+  logger.info("Impresión de resumen de nómina de jubilados", { idPlanilla, usuario: user?.usuario });
+  return { buffer: await pdf.aBuffer(doc), filename: `resumen_nomina_jubilados_${planilla.numero}.pdf` };
+};
+
 module.exports = {
+  getNominaJubilados,
+  pdfNominaJubilados,
+  getResumenJubilados,
+  pdfResumenJubilados,
   getEstadoAportaciones,
   pdfEstadoAportaciones,
   getNominaSueldos,

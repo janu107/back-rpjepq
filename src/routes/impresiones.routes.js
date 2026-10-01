@@ -15,6 +15,8 @@ router.get("/nomina-tiempo-extra/:idPlanilla", controller.previewNominaTiempoExt
 router.get("/prestamo/:idPrestamo/estado-cuenta", controller.previewEstadoCuenta);
 router.get("/resumen", controller.previewResumen);
 router.get("/aportaciones/:idAportacion/estado-cuenta", controller.previewEstadoAportaciones);
+router.get("/nomina-jubilados/:idPlanilla", controller.previewNominaJubilados);
+router.get("/resumen-jubilados/:idPlanilla", controller.previewResumenJubilados);
 router.get("/nomina-prestamos", controller.previewNominaPrestamos);
 
 // --- Impresiones PDF ---------------------------------------------------------
@@ -37,6 +39,14 @@ router.get("/aportaciones/:idAportacion/estado-cuenta/pdf",
 router.get("/resumen/pdf",
   auditAction("IMPRESIONES", "RESUMEN_PDF", (req) => `Imprimir resumen (manejo ${req.query?.tipoManejo}) del ${req.query?.desde} al ${req.query?.hasta}`),
   controller.pdfResumen);
+
+router.get("/nomina-jubilados/:idPlanilla/pdf",
+  auditAction("IMPRESIONES", "NOMINA_JUBILADOS_PDF", (req) => `Imprimir nómina de jubilados de la planilla ${req.params.idPlanilla}`),
+  controller.pdfNominaJubilados);
+
+router.get("/resumen-jubilados/:idPlanilla/pdf",
+  auditAction("IMPRESIONES", "RESUMEN_JUBILADOS_PDF", (req) => `Imprimir resumen de nómina de jubilados de la planilla ${req.params.idPlanilla}`),
+  controller.pdfResumenJubilados);
 
 router.get("/nomina-prestamos/pdf",
   auditAction("IMPRESIONES", "NOMINA_PRESTAMOS_PDF", (req) => `Imprimir nómina de préstamos EPQ del ${req.query?.desde} al ${req.query?.hasta}`),
