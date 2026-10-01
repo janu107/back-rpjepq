@@ -24,6 +24,14 @@ const errorHandler = (err, req, res, next) => {
       case "ER_NO_REFERENCED_ROW":
       case "ER_NO_REFERENCED_ROW_2":
         status = 400; message = "Dato relacionado inválido."; break;
+      // SIGNAL SQLSTATE '45000' dentro de un procedimiento NO es una falla del
+      // servidor: es una regla de negocio que nosotros mismos escribimos (ej.
+      // "Solo se pueden revertir planillas GENERADAS"). Antes caía en el caso
+      // genérico y el usuario veía un error de servidor en vez del motivo real,
+      // que además quedaba sólo en el log. El texto del MESSAGE_TEXT es nuestro,
+      // no SQL crudo, así que se puede mostrar tal cual.
+      case "ER_SIGNAL_EXCEPTION":
+        status = 409; message = err.sqlMessage || err.message || "La operación no es válida en el estado actual."; break;
       default:
         status = 500; message = "No se pudo completar la operación en la base de datos.";
     }
