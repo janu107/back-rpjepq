@@ -4,8 +4,12 @@ const getSql = require("../utils/sqlLoader");
 const ExcelJS = require("exceljs");
 const { assertCan, createError } = require("../utils/planillaEstado");
 
-// CAMBIO X: las planillas de pensionados son SIEMPRE tipo 2 (NÓMINA JUBILADOS).
-const TIPO_PLANILLA_PENSIONADOS = 2;
+// Tipos que administra esta pantalla: 2 = nómina de jubilados (pensionados),
+// 4 = nómina de amparistas. Antes el tipo era fijo en 2 y los amparistas se
+// generaban desde otra pantalla; ahora ambos viven en el módulo de Nóminas.
+const TIPO_PENSIONADOS = 2;
+const TIPO_AMPARISTAS = 4;
+const TIPOS_VALIDOS = [TIPO_PENSIONADOS, TIPO_AMPARISTAS];
 
 const sql = (file) => getSql(`planillas-pensionados/${file}.sql`);
 
@@ -81,15 +85,20 @@ const getById = async (id) => {
 
 const create = async (payload, currentUser) => {
   validate(payload);
-  // CAMBIO X: el tipo de planilla se fuerza a NÓMINA JUBILADOS (2), sin importar
-  // lo que envíe el frontend.
-  const tipoPlanilla = TIPO_PLANILLA_PENSIONADOS;
+  const tipoPlanilla = TIPOS_VALIDOS.includes(Number(payload.tipoPlanilla))
+    ? Number(payload.tipoPlanilla)
+    : TIPO_PENSIONADOS;
   // Evitar planillas duplicadas por tipo + numero (Version VII)
   const [dup] = await pool.execute(
     "SELECT ppl_correlativo FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = ? AND ppl_numero = ?",
     [tipoPlanilla, payload.numero]
   );
-  if (dup.length) throw createError("YA EXISTE UNA PLANILLA DE PENSIONADOS CON ESE NUMERO", 409);
+  if (dup.length) {
+    throw createError(
+      `YA EXISTE UNA PLANILLA DE ${tipoPlanilla === TIPO_AMPARISTAS ? "AMPARISTAS" : "PENSIONADOS"} CON ESE NUMERO`,
+      409
+    );
+  }
   const usuario = currentUser?.usuario || "sistema";
   const params = [
     tipoPlanilla, payload.numero,
@@ -177,12 +186,35 @@ const callSp = async (spCall, inParams, outNames) => {
   }
 };
 
+// Genera la nómina con el SP que corresponda al tipo de la planilla:
+//   tipo 2 -> sp_generar_nomina_pensionados (jubilados normales + beneficiarios)
+//   tipo 4 -> sp_generar_nomina_amparistas  (amparistas, siempre al 100%)
+// Así una sola pantalla cubre ambos casos y no hay que recordar cuál botón va
+// con cuál planilla.
 const generar = async (id, tipoIngreso, currentUser) => {
   const planilla = await getById(id);
   // CAMBIO X: se permite generar desde ABIERTA o REVERSADA (volver a generar).
   assertCan("generar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
-  logger.info("Generando nomina pensionados", { idPlanilla: id, usuario });
+  const esAmparistas = Number(planilla.tipoPlanilla) === TIPO_AMPARISTAS;
+  logger.info("Generando nomina", { idPlanilla: id, tipoPlanilla: planilla.tipoPlanilla, usuario });
+
+  if (esAmparistas) {
+    const out = await callSp(
+      "sp_generar_nomina_amparistas(?, ?, @p_proc, @p_total, @p_res)",
+      [id, usuario],
+      ["p_proc", "p_total", "p_res"]
+    );
+    logger.info("Nomina amparistas generada", { idPlanilla: id, ...out });
+    return {
+      procesados: toNum(out.p_proc),
+      excluidos: 0,
+      totalPagado: toNum(out.p_total),
+      totalDescuentos: 0,
+      mensaje: out.p_res,
+      estadoNuevo: "GENERADA"
+    };
+  }
 
   const out = await callSp(
     `sp_generar_nomina_pensionados(?, ?, ?, @p_proc, @p_excl, @p_pag, @p_desc)`,

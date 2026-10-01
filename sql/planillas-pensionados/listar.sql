@@ -39,5 +39,7 @@ LEFT JOIN (
   WHERE nde_id_jubilado IS NOT NULL AND nde_tipo_manejo = 2
   GROUP BY nde_id_planilla
 ) des ON des.nde_id_planilla = p.ppl_correlativo
-WHERE p.ppl_tipo_planilla = 2
+-- Tipo 2 = nómina de pensionados, tipo 4 = nómina de amparistas.
+-- Ambas se administran desde la misma pantalla del módulo de Nóminas.
+WHERE p.ppl_tipo_planilla IN (2, 4)
 ORDER BY p.ppl_correlativo DESC;
