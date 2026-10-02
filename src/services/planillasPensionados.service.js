@@ -15,10 +15,20 @@ const sql = (file) => getSql(`planillas-pensionados/${file}.sql`);
 
 const toNum = (v) => Number(v || 0);
 
+// Nombre legible a partir del id numérico del tipo de planilla.
+//
+// No se usa RPJ_CAT_TIPO_PLANILLA.tpl_tipo_planilla: en producción esa columna
+// guarda una bandera ("1") para todas las filas, no el nombre, así que la
+// pantalla mostraba "1" como tipo. El nombre real está en tpl_descripcion, pero
+// su formato cambia entre ambientes; el id numérico es nuestro y es estable.
+const NOMBRE_POR_TIPO = { 2: "NÓMINA JUBILADOS", 4: "NÓMINA AMPARISTAS" };
+
 const mapPlanilla = (row) => ({
   id: row.id,
   tipoPlanilla: row.tipo_planilla,
-  tipoPlanillaNombre: row.tipo_planilla_nombre,
+  tipoPlanillaNombre: NOMBRE_POR_TIPO[Number(row.tipo_planilla)]
+    || row.tipo_planilla_descripcion
+    || row.tipo_planilla_nombre,
   tipoPlanillaDescripcion: row.tipo_planilla_descripcion,
   numero: row.numero,
   fechaInicio: row.fecha_inicio,
