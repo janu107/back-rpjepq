@@ -150,16 +150,23 @@ const getNominaSueldos = async (idPlanilla) => {
 };
 
 const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
-  const { planilla, filas } = await getNominaSueldos(idPlanilla);
-  if (!filas.length) throw createError("La planilla no tiene renglones de empleados para imprimir", 409);
+  const { planilla, filas: todas } = await getNominaSueldos(idPlanilla);
+  if (!todas.length) throw createError("La planilla no tiene renglones de empleados para imprimir", 409);
+
+  // Parámetro "area": nombre de un área del catálogo (o SIN AREA). Vacío = todas,
+  // agrupadas por área. Con un área concreta, ese nombre sale al centro del encabezado.
+  const areaPedida = String(opciones.area || "").trim().toUpperCase();
+  const filas = areaPedida ? todas.filter((f) => String(f.area).toUpperCase() === areaPedida) : todas;
+  if (!filas.length) throw createError(`La planilla no tiene empleados del área ${areaPedida}`, 409);
 
   const firmas = parsearFirmas(opciones.firmas);
-  const porArea = String(opciones.porArea ?? "true") !== "false";
+  const porArea = !areaPedida && String(opciones.porArea ?? "true") !== "false";
   const doc = pdf.nuevoDoc(pdf.OFICIO);
   const columnas = COLS_SUELDOS(doc);
 
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "NOMINA DE SUELDOS - EMPLEADOS DE REGIMEN",
+    area: areaPedida || null,
     subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`
   });
   cabecera(doc);
@@ -705,21 +712,28 @@ const pdfNominaJubilados = async (idPlanilla, opciones = {}, user) => {
 // ---------------------------------------------------------------------------
 // Resumen de nómina de jubilados (carta vertical): pensiones por tipo + remesas
 // ---------------------------------------------------------------------------
-const getResumenJubilados = async (idPlanilla) => {
+const getResumenJubilados = async (idPlanilla, opciones = {}) => {
   const planilla = await getPlanilla(idPlanilla);
-  const [[pensiones], [remesas]] = await Promise.all([
+  const tipo = String(opciones.tipoJubilacion || "").trim().toUpperCase() || null;
+  const [[pensionesTodas], [remesas]] = await Promise.all([
     pool.execute(sql("resumenJubiladosPensiones"), [idPlanilla, idPlanilla]),
-    pool.execute(sql("resumenJubiladosRemesas"), [idPlanilla])
+    pool.execute(sql("resumenJubiladosRemesas"), [idPlanilla, tipo, tipo])
   ]);
-  return { planilla, pensiones, remesas };
+  const pensiones = tipo ? pensionesTodas.filter((p) => String(p.tipo_jubilacion).toUpperCase() === tipo) : pensionesTodas;
+  return { planilla, pensiones, remesas, tipoJubilacion: tipo };
 };
 
 const pdfResumenJubilados = async (idPlanilla, opciones = {}, user) => {
-  const { planilla, pensiones, remesas } = await getResumenJubilados(idPlanilla);
+  const { planilla, pensiones, remesas, tipoJubilacion } = await getResumenJubilados(idPlanilla, opciones);
+  if (tipoJubilacion && !pensiones.length) {
+    throw createError(`La planilla no tiene jubilados del tipo ${tipoJubilacion}`, 409);
+  }
+  const firmas = parsearFirmas(opciones.firmas);
   const doc = pdf.nuevoDoc(pdf.CARTA);
 
   pdf.encabezado(doc, {
     titulo: "RESUMEN DE NOMINA DE JUBILADOS",
+    area: tipoJubilacion ? `Tipo de jubilación: ${tipoJubilacion}` : null,
     subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}`,
     lineas: [`Pago ${fecha(planilla.fechaPago)}   ·   Generado por ${user?.usuario || "sistema"}`]
   });
@@ -769,12 +783,33 @@ const pdfResumenJubilados = async (idPlanilla, opciones = {}, user) => {
   const granTotal = sumar(pensiones, "liquido") + sumar(remesas, "monto");
   doc.font("Helvetica-Bold").fontSize(9).text(`TOTAL GENERAL: Q ${q(granTotal)}`, { align: "right" });
 
+  pdf.bloqueFirmas(doc, firmas);
   pdf.pieDePagina(doc, user?.usuario);
   logger.info("Impresión de resumen de nómina de jubilados", { idPlanilla, usuario: user?.usuario });
-  return { buffer: await pdf.aBuffer(doc), filename: `resumen_nomina_jubilados_${planilla.numero}.pdf` };
+  return { buffer: await pdf.aBuffer(doc), filename: `resumen_nomina_jubilados_${planilla.numero}${tipoJubilacion ? "_" + tipoJubilacion.toLowerCase().replace(/s+/g, "_") : ""}.pdf` };
+};
+
+// Listas para los parámetros de las pantallas de impresión (áreas y tipos de
+// jubilación). Van aquí y no en /catalogos porque ese endpoint no es para todos los roles.
+const getOpciones = async () => {
+  const leer = async (consulta) => {
+    try { const [rows] = await pool.execute(consulta); return rows; } catch (error) {
+      logger.warn("No se pudo leer un catálogo de opciones de impresión", { code: error.code, message: error.message });
+      return [];
+    }
+  };
+  const [areas, tipos] = await Promise.all([
+    leer("SELECT are_descripcion AS nombre FROM RPJ_CAT_AREA ORDER BY are_descripcion"),
+    leer("SELECT tju_id AS id, tju_descripcion AS nombre FROM RPJ_CAT_TIPO_JUBILACION ORDER BY tju_id")
+  ]);
+  return {
+    areas: [...areas.map((a) => a.nombre), SIN_AREA],
+    tiposJubilacion: tipos.map((t) => ({ id: t.id, nombre: t.nombre }))
+  };
 };
 
 module.exports = {
+  getOpciones,
   getNominaJubilados,
   pdfNominaJubilados,
   getResumenJubilados,

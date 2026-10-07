@@ -1,6 +1,8 @@
 -- Impresión de nómina de sueldos (empleados de régimen).
 -- El área NO se resuelve aquí: se agrega después con areasPorEmpleado.sql, para
 -- que un catálogo de áreas incompleto no tumbe el reporte completo.
+-- Los descuentos se clasifican por NOMBRE del catalogo (no por id fijo): los ids
+-- difieren entre ambientes y un id equivocado dejaba el I.G.S.S. en cero.
 -- Ingresos y descuentos se agregan por separado para no multiplicar renglones.
 -- Params: [idPlanilla, idPlanilla].
 SELECT
@@ -37,14 +39,16 @@ INNER JOIN (
    GROUP BY nin_id_empleado
 ) ing ON ing.nin_id_empleado = e.emp_correlativo
 LEFT JOIN (
-  SELECT nde_id_empleado,
-         SUM(CASE WHEN nde_tipo_descuento = 1 THEN nde_valor ELSE 0 END) AS igss,
-         SUM(CASE WHEN nde_tipo_descuento = 2 THEN nde_valor ELSE 0 END) AS isr,
-         SUM(CASE WHEN nde_tipo_descuento IN (3, 4, 8) THEN nde_valor ELSE 0 END) AS judicial_otros,
-         SUM(CASE WHEN nde_tipo_descuento IN (5, 6, 7, 9) THEN nde_valor ELSE 0 END) AS prestamos,
-         SUM(nde_valor) AS total_descuentos
-    FROM RPJ_PRC_NOMINA_DESCUENTO
-   WHERE nde_id_planilla = ? AND nde_id_empleado IS NOT NULL
-   GROUP BY nde_id_empleado
+  SELECT d.nde_id_empleado,
+         SUM(CASE WHEN UPPER(t.tde_tipo_descuento) = 'IGSS' THEN d.nde_valor ELSE 0 END) AS igss,
+         SUM(CASE WHEN UPPER(t.tde_tipo_descuento) = 'ISR' THEN d.nde_valor ELSE 0 END) AS isr,
+         SUM(CASE WHEN UPPER(t.tde_tipo_descuento) NOT IN ('IGSS', 'ISR')
+                   AND UPPER(t.tde_tipo_descuento) NOT LIKE 'PRESTAMO%' THEN d.nde_valor ELSE 0 END) AS judicial_otros,
+         SUM(CASE WHEN UPPER(t.tde_tipo_descuento) LIKE 'PRESTAMO%' THEN d.nde_valor ELSE 0 END) AS prestamos,
+         SUM(d.nde_valor) AS total_descuentos
+    FROM RPJ_PRC_NOMINA_DESCUENTO d
+    LEFT JOIN RPJ_CAT_TIPO_DESCUENTO t ON t.tde_id = d.nde_tipo_descuento
+   WHERE d.nde_id_planilla = ? AND d.nde_id_empleado IS NOT NULL
+   GROUP BY d.nde_id_empleado
 ) des ON des.nde_id_empleado = e.emp_correlativo
 ORDER BY e.emp_apellidos, e.emp_nombres;

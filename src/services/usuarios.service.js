@@ -17,7 +17,9 @@ const mapUser = (row) => ({
   fechaInicio: row.usu_fecha_inicio,
   fechaCreacion: row.usu_fecha_creacion,
   rolId: row.rol_id,
-  rol: row.rol_tipo_rol || null
+  roles: rolesService.splitRoles(row.rol_tipo_rol),
+  // Primer rol (el formulario de usuarios maneja uno; los demás se gestionan en Roles).
+  rol: rolesService.splitRoles(row.rol_tipo_rol)[0] || null
 });
 
 const createError = (message, status = 400) => {

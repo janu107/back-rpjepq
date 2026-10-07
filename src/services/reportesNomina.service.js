@@ -91,10 +91,36 @@ const mapDescuento = (row) => ({
   fechaCreacion: row.nde_fecha_creacion
 });
 
+// A quién pertenece cada planilla. Se deriva del id numérico del tipo y no de
+// tpl_tipo_planilla, que en producción trae una bandera ("1") en vez del nombre.
+const TIPO_PLANILLA = {
+  1: { nombre: "NÓMINA EMPLEADOS", pertenece: "EMPLEADOS RÉGIMEN" },
+  2: { nombre: "NÓMINA JUBILADOS", pertenece: "JUBILADOS" },
+  3: { nombre: "TIEMPO EXTRA", pertenece: "EMPLEADOS RÉGIMEN" },
+  4: { nombre: "NÓMINA AMPARISTAS", pertenece: "JUBILADOS" },
+  5: { nombre: "BONO 14", pertenece: "EMPLEADOS RÉGIMEN" },
+  6: { nombre: "BONO 14 JUBILADOS", pertenece: "JUBILADOS" },
+  7: { nombre: "AGUINALDO", pertenece: "EMPLEADOS RÉGIMEN" },
+  8: { nombre: "AGUINALDO JUBILADOS", pertenece: "JUBILADOS" },
+  9: { nombre: "BONO VACACIONAL", pertenece: "EMPLEADOS RÉGIMEN" }
+};
+
+const perteneceDe = (row) => {
+  const conocido = TIPO_PLANILLA[Number(row.id_tipo_planilla)];
+  if (conocido) return conocido;
+  const texto = `${row.tpl_tipo_planilla || ""} ${row.tipo_planilla_descripcion || ""}`.toUpperCase();
+  return {
+    nombre: row.tipo_planilla_descripcion || row.tpl_tipo_planilla || "",
+    pertenece: /DIETA|JUNTA/.test(texto) ? "JUNTA DIRECTIVA" : /JUBIL|PENSION|AMPAR/.test(texto) ? "JUBILADOS" : "EMPLEADOS RÉGIMEN"
+  };
+};
+
 const mapPlanillaListado = (row) => ({
   idPlanilla: row.id_planilla,
   numeroPlanilla: row.numero_planilla,
   idTipoPlanilla: row.id_tipo_planilla,
+  tipoPlanillaNombre: perteneceDe(row).nombre,
+  pertenece: perteneceDe(row).pertenece,
   tipoPlanilla: row.tpl_tipo_planilla,
   tipoPlanillaDescripcion: row.tipo_planilla_descripcion,
   fechaInicio: row.ppl_fecha_inicio,

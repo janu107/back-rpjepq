@@ -6,8 +6,9 @@ SELECT
   u.usu_estado,
   u.usu_fecha_inicio,
   u.usu_contrasena,
-  r.rol_id,
-  r.rol_tipo_rol
+  MIN(r.rol_id) AS rol_id,
+  GROUP_CONCAT(r.rol_tipo_rol ORDER BY r.rol_id SEPARATOR ',') AS rol_tipo_rol
 FROM RPJ_ADM_USUARIO u
 LEFT JOIN RPJ_ADM_ROL r ON r.rol_usuario = u.usu_id
-WHERE u.usu_usuario = ?;
+WHERE u.usu_usuario = ?
+GROUP BY u.usu_id;

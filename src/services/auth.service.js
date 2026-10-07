@@ -5,14 +5,25 @@ const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 
-const normalizeUser = (user) => ({
-  id: user.usu_id,
-  usuario: user.usu_usuario,
-  nombre: user.usu_nombre,
-  correo: user.usu_correo,
-  estado: user.usu_estado,
-  rol: user.rol_tipo_rol || null
-});
+const { splitRoles } = require("./roles.service");
+
+// El rol "principal" (campo rol, que ya usaban auditoría y otras validaciones) es
+// el de mayor jerarquía: así un ADMIN con más roles sigue siendo ADMIN.
+const PRIORIDAD = ["ADMIN", "ADMINISTRACION", "OPERADOR"];
+const rolPrincipal = (roles) => PRIORIDAD.find((r) => roles.includes(r)) || roles[0] || null;
+
+const normalizeUser = (user) => {
+  const roles = splitRoles(user.rol_tipo_rol);
+  return {
+    id: user.usu_id,
+    usuario: user.usu_usuario,
+    nombre: user.usu_nombre,
+    correo: user.usu_correo,
+    estado: user.usu_estado,
+    rol: rolPrincipal(roles),
+    roles
+  };
+};
 
 const login = async (usuario, contrasena) => {
   logger.info("Intento de login", { usuario });
@@ -50,10 +61,12 @@ const login = async (usuario, contrasena) => {
     throw error;
   }
 
+  const roles = splitRoles(user.rol_tipo_rol);
   const payload = {
     id: user.usu_id,
     usuario: user.usu_usuario,
-    rol: user.rol_tipo_rol || null
+    rol: rolPrincipal(roles),
+    roles
   };
 
   const token = jwt.sign(payload, process.env.JWT_SECRET, {
@@ -63,7 +76,7 @@ const login = async (usuario, contrasena) => {
   logger.info("Login exitoso", {
     id: user.usu_id,
     usuario: user.usu_usuario,
-    rol: user.rol_tipo_rol || null
+    roles
   });
 
   return {
@@ -137,7 +150,8 @@ const createInitialAdmin = async () => {
       nombre: adminName,
       correo: adminEmail,
       estado: "ACTIVO",
-      rol: adminRole
+      rol: adminRole,
+      roles: [adminRole]
     }
   };
 };

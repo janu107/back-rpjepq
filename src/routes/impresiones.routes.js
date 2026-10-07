@@ -9,6 +9,8 @@ const router = Router();
 router.use(authMiddleware);
 router.use(authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"));
 
+router.get("/opciones", controller.opciones);
+
 // --- Vistas previas en pantalla (JSON) --------------------------------------
 router.get("/nomina-sueldos/:idPlanilla", controller.previewNominaSueldos);
 router.get("/nomina-tiempo-extra/:idPlanilla", controller.previewNominaTiempoExtra);

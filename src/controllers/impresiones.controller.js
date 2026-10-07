@@ -15,8 +15,10 @@ const previewEstadoCuenta = async (req, res, next) => { try { return successResp
 const previewResumen = async (req, res, next) => { try { return successResponse(res, await service.getResumen(req.query), "Resumen obtenido correctamente"); } catch (e) { next(e); } };
 const previewEstadoAportaciones = async (req, res, next) => { try { return successResponse(res, await service.getEstadoAportaciones(req.params.idAportacion), "Estado de aportaciones obtenido correctamente"); } catch (e) { next(e); } };
 const previewNominaJubilados = async (req, res, next) => { try { return successResponse(res, await service.getNominaJubilados(req.params.idPlanilla, req.query), "Nómina de jubilados obtenida correctamente"); } catch (e) { next(e); } };
-const previewResumenJubilados = async (req, res, next) => { try { return successResponse(res, await service.getResumenJubilados(req.params.idPlanilla), "Resumen de jubilados obtenido correctamente"); } catch (e) { next(e); } };
+const previewResumenJubilados = async (req, res, next) => { try { return successResponse(res, await service.getResumenJubilados(req.params.idPlanilla, req.query), "Resumen de jubilados obtenido correctamente"); } catch (e) { next(e); } };
 const previewNominaPrestamos = async (req, res, next) => { try { return successResponse(res, await service.getNominaPrestamos(req.query), "Nómina de préstamos obtenida correctamente"); } catch (e) { next(e); } };
+
+const opciones = async (req, res, next) => { try { return successResponse(res, await service.getOpciones(), "Opciones obtenidas correctamente"); } catch (e) { next(e); } };
 
 // --- Impresiones PDF ---------------------------------------------------------
 const pdfNominaSueldos = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaSueldos(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
@@ -29,6 +31,7 @@ const pdfResumenJubilados = async (req, res, next) => { try { return enviarPdf(r
 const pdfNominaPrestamos = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaPrestamos(req.query, req.user)); } catch (e) { next(e); } };
 
 module.exports = {
+  opciones,
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,
   previewEstadoAportaciones, previewNominaJubilados, previewResumenJubilados,
   pdfNominaSueldos, pdfNominaTiempoExtra, pdfEstadoCuenta, pdfResumen, pdfNominaPrestamos,

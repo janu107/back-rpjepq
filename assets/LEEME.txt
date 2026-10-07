@@ -1,0 +1,3 @@
+Coloque aqui el logo del regimen como logo-regimen.png (o .jpg).
+Se imprime en la esquina superior izquierda de todos los reportes PDF.
+Si el archivo no existe, los reportes salen sin logo.

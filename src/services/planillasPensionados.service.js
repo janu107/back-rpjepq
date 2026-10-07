@@ -360,14 +360,15 @@ const generarDeudaHistoricaMasivo = async (periodoFinal, porcentaje, currentUser
   logger.info("Generando deuda historica masivo", { periodoFinal, porcentaje: pct, usuario });
 
   const out = await callSp(
-    `sp_generar_deuda_historica_masivo(?, ?, ?, @p_jub, @p_deu)`,
+    `sp_generar_deuda_historica_masivo(?, ?, ?, @p_jub, @p_deu, @p_omi)`,
     [Number(periodoFinal), pct, usuario],
-    ["p_jub", "p_deu"]
+    ["p_jub", "p_deu", "p_omi"]
   );
 
   return {
     jubiladosProcesados: toNum(out.p_jub),
-    totalDeudas: toNum(out.p_deu)
+    totalDeudas: toNum(out.p_deu),
+    omitidos: toNum(out.p_omi)
   };
 };
 

@@ -1,5 +1,7 @@
 const PDFDocument = require("pdfkit");
 const dayjs = require("dayjs");
+const fs = require("fs");
+const path = require("path");
 
 // ============================================================================
 // Utilidades de maquetación PDF compartidas por las impresiones formales
@@ -45,11 +47,30 @@ const repartirAnchos = (doc, pesos) => {
   return pesos.map((p) => (p / total) * disponible);
 };
 
-const encabezado = (doc, { titulo, subtitulo, lineas = [] }) => {
+// Logo del régimen: se busca en back-rpjepq/assets/ (logo-regimen.png|jpg). Si el
+// archivo no existe el reporte sale igual, sin logo, en vez de fallar.
+// Se busca en cada impresión (no al arrancar) para que basta con copiar el archivo.
+const buscarLogo = () => ["logo-regimen.png", "logo-regimen.jpg", "logo-regimen.jpeg"]
+  .map((n) => path.join(__dirname, "..", "..", "assets", n))
+  .find((f) => fs.existsSync(f));
+
+const dibujarLogo = (doc) => {
+  const ruta = buscarLogo();
+  if (!ruta) return;
+  try {
+    const lado = 40;
+    doc.image(ruta, doc.page.margins.left, doc.page.margins.top - 2, { fit: [lado, lado] });
+  } catch (_) { /* un logo dañado no debe tumbar el reporte */ }
+};
+
+// "area" se muestra al centro del encabezado (ej. OPERATIVO), debajo del título.
+const encabezado = (doc, { titulo, subtitulo, lineas = [], area }) => {
+  dibujarLogo(doc);
   // Nombre institucional, igual al que ya usan los reportes en pantalla.
   doc.font("Helvetica-Bold").fontSize(12).text("REGIMEN DE PENSIONES Y JUBILACIONES", { align: "center" });
   doc.fontSize(10).text("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", { align: "center" });
   doc.moveDown(0.25).fontSize(10).text(String(titulo || "").toUpperCase(), { align: "center" });
+  if (area) doc.font("Helvetica-Bold").fontSize(10).text(String(area).toUpperCase(), { align: "center" });
   if (subtitulo) doc.font("Helvetica").fontSize(8).text(subtitulo, { align: "center" });
   if (lineas.length) {
     doc.font("Helvetica").fontSize(7.5);
@@ -162,12 +183,17 @@ const pieDePagina = (doc, usuario) => {
   const paginas = doc.bufferedPageRange();
   for (let i = 0; i < paginas.count; i += 1) {
     doc.switchToPage(paginas.start + i);
+    // El pie va DEBAJO del margen inferior; con el margen normal pdfkit abría una
+    // página nueva por cada pie (hoja en blanco al final). Se anula mientras se dibuja.
+    const margenInferior = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(6).fillColor("#666666").text(
       `Generado por ${usuario || "sistema"} el ${dayjs().format("DD/MM/YYYY HH:mm")}   ·   Página ${i + 1} de ${paginas.count}`,
       doc.page.margins.left,
-      doc.page.height - doc.page.margins.bottom + 8,
+      doc.page.height - margenInferior + 8,
       { width: anchoUtil(doc), align: "right", lineBreak: false }
     );
+    doc.page.margins.bottom = margenInferior;
   }
   doc.fillColor("#000000");
 };

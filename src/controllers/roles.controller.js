@@ -11,12 +11,13 @@ const listRoles = async (req, res, next) => {
 };
 
 const listRoleTypes = (req, res) => {
-  return successResponse(res, rolesService.TIPOS_ROL, "Tipos de rol listados correctamente");
+  return successResponse(res, rolesService.listRoleTypes(), "Tipos de rol listados correctamente");
 };
 
 const updateUserRole = async (req, res, next) => {
   try {
-    const data = await rolesService.upsertUserRole(req.params.id, req.body.rol, req.user?.usuario);
+    // Acepta { roles: [...] } (varios) o { rol } (uno, compatibilidad).
+    const data = await rolesService.setUserRoles(req.params.id, req.body.roles ?? req.body.rol, req.user?.usuario);
     return successResponse(res, data, "Rol actualizado correctamente");
   } catch (error) {
     next(error);
