@@ -1,5 +1,6 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
+const tiposMonto = require("./tiposMonto.service");
 const getSql = require("../utils/sqlLoader");
 const ExcelJS = require("exceljs");
 const { assertCan, createError } = require("../utils/planillaEstado");
@@ -277,6 +278,8 @@ const reversarJubilado = async (id, idJubilado, motivo, currentUser) => {
 };
 
 // CAMBIO X: renglones de ingreso/descuento de un jubilado para edición de montos.
+const getTiposMonto = () => tiposMonto.listarTiposMonto();
+
 const getMontos = async (id, idJubilado) => {
   const [rows] = await pool.execute(sql("montosJubilado"), [id, idJubilado, id, idJubilado]);
   return rows.map((r) => ({
@@ -294,7 +297,9 @@ const editarMontos = async (id, idJubilado, payload, currentUser) => {
 
   const ingresos = Array.isArray(payload?.ingresos) ? payload.ingresos : [];
   const descuentos = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
-  if (!ingresos.length && !descuentos.length) throw createError("No se recibieron montos para actualizar");
+  // Renglones agregados a mano (tipo de ingreso o descuento que no generó el proceso).
+  const nuevos = tiposMonto.validarNuevos(payload?.nuevos, createError);
+  if (!ingresos.length && !descuentos.length && !nuevos.length) throw createError("No se recibieron montos para actualizar");
 
   const valido = (v) => v !== undefined && v !== null && !Number.isNaN(Number(v)) && Number(v) >= 0;
   for (const ing of ingresos) if (!valido(ing.valor)) throw createError("Los montos de ingreso deben ser números mayores o iguales a 0");
@@ -312,6 +317,12 @@ const editarMontos = async (id, idJubilado, payload, currentUser) => {
     }
     for (const des of descuentos) {
       await conn.execute(sql("actualizarMontoDescuento"), [toNum(des.valor), des.id, id, idJubilado]);
+    }
+    for (const n of nuevos) {
+      const [res] = n.clase === "INGRESO"
+        ? await conn.execute(sql("agregarIngreso"), [n.tipo, n.valor, n.valor, n.valor, usuario, id, idJubilado])
+        : await conn.execute(sql("agregarDescuento"), [n.tipo, n.valor, usuario, id, idJubilado]);
+      if (!res.affectedRows) throw createError("No se pudo agregar el renglón: la persona no tiene pagos en esta planilla");
     }
     await conn.commit();
   } catch (e) {
@@ -365,7 +376,17 @@ const generarDeudaHistoricaMasivo = async (periodoFinal, porcentaje, currentUser
     ["p_jub", "p_deu", "p_omi"]
   );
 
+  // Jubilados activos sin pensión configurada (salario tipo de ingreso 1): no
+  // generan deuda. Se informa para que no parezca que la carga "no hizo nada".
+  const [[sinPension]] = await pool.query(
+    `SELECT COUNT(*) AS total FROM RPJ_MNT_JUBILADO j
+      WHERE j.jub_tipo_manejo = 2 AND UPPER(COALESCE(j.jub_estado,'')) = 'ACTIVO'
+        AND NOT EXISTS (SELECT 1 FROM RPJ_MNT_SALARIO s
+                         WHERE s.sal_id_jubilado = j.jub_correlativo AND s.sal_salario > 0)`
+  );
+
   return {
+    sinPension: toNum(sinPension.total),
     jubiladosProcesados: toNum(out.p_jub),
     totalDeudas: toNum(out.p_deu),
     omitidos: toNum(out.p_omi)
@@ -427,6 +448,7 @@ const exportBanco = async (id) => {
 };
 
 module.exports = {
+  getTiposMonto,
   list, getById, create, update, preview,
   generar, getDetalle, cerrar, reversar, reversarJubilado,
   getMontos, editarMontos,

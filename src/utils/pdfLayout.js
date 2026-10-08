@@ -179,6 +179,24 @@ const bloqueFirmas = (doc, firmas = []) => {
   doc.y = yBase + alto;
 };
 
+// Dibuja con márgenes laterales más anchos (tabla centrada). Se aplica también a
+// doc.options para que las páginas nuevas que abra la tabla queden igual.
+const conMargenLateral = (doc, extra, dibujar) => {
+  const original = { ...doc.page.margins };
+  const originalOpciones = doc.options.margins ? { ...doc.options.margins } : null;
+  const aplicar = (m) => ({ ...m, left: original.left + extra, right: original.right + extra });
+  doc.page.margins = aplicar(original);
+  doc.options.margins = aplicar(original);
+  try {
+    doc.x = doc.page.margins.left;
+    dibujar();
+  } finally {
+    doc.page.margins = original;
+    if (originalOpciones) doc.options.margins = originalOpciones; else delete doc.options.margins;
+    doc.x = original.left;
+  }
+};
+
 const pieDePagina = (doc, usuario) => {
   const paginas = doc.bufferedPageRange();
   for (let i = 0; i < paginas.count; i += 1) {
@@ -199,7 +217,8 @@ const pieDePagina = (doc, usuario) => {
 };
 
 module.exports = {
+  buscarLogo,
   OFICIO, CARTA, num, q, fecha, fechaLarga,
   nuevoDoc, aBuffer, anchoUtil, repartirAnchos,
-  encabezado, dibujarTabla, filaTotales, bloqueFirmas, pieDePagina
+  encabezado, dibujarTabla, filaTotales, bloqueFirmas, pieDePagina, conMargenLateral
 };

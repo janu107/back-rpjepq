@@ -71,6 +71,10 @@ const reversarEmpleado = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const getTiposMonto = async (req, res, next) => {
+  try { return successResponse(res, await service.getTiposMonto(), "Tipos obtenidos correctamente"); } catch (e) { next(e); }
+};
+
 const getMontos = async (req, res, next) => {
   try {
     const data = await service.getMontos(req.params.id, req.params.eid);
@@ -105,6 +109,6 @@ const exportBanco = async (req, res, next) => {
 
 module.exports = {
   list, getById, create, update, preview, generar, getDetalle,
-  cerrar, reversar, reversarEmpleado, getMontos, editarMontos,
+  cerrar, reversar, reversarEmpleado, getMontos, getTiposMonto, editarMontos,
   exportExcel, exportBanco
 };

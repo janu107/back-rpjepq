@@ -1,4 +1,7 @@
-const { Router } = require("express");
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const { Router } = express;
 
 const authRoutes = require("./auth.routes");
 const catalogosRoutes = require("./catalogos.routes");
@@ -38,6 +41,8 @@ const prestacionesRoutes = require("./prestaciones.routes");
 const prestacionesJubiladosRoutes = require("./prestacionesJubilados.routes");
 const impresionesRoutes = require("./impresiones.routes");
 const authMiddleware = require("../middlewares/auth.middleware");
+const { buscarLogo } = require("../utils/pdfLayout");
+const { authorizeRoles } = require("../middlewares/role.middleware");
 
 const router = Router();
 
@@ -48,6 +53,36 @@ const baseProtectedResponse = (message) => (req, res) => {
     data: []
   });
 };
+
+// Logo del régimen (público: se usa en el encabezado de los reportes en pantalla).
+// Es el mismo archivo que imprimen los PDF: back-rpjepq/assets/logo-regimen.png
+router.get("/logo", (req, res) => {
+  const ruta = buscarLogo();
+  if (!ruta) return res.status(404).end();
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  return res.sendFile(ruta);
+});
+
+// Subir/reemplazar el logo desde la pantalla de Mantenimiento (sólo ADMIN), para
+// no depender de copiar el archivo al servidor. Se recibe la imagen cruda.
+router.post(
+  "/logo",
+  authMiddleware,
+  authorizeRoles("ADMIN"),
+  express.raw({ type: ["image/png", "image/jpeg"], limit: "3mb" }),
+  (req, res) => {
+    const tipo = String(req.headers["content-type"] || "");
+    if (!Buffer.isBuffer(req.body) || !req.body.length || !["image/png", "image/jpeg"].includes(tipo.split(";")[0].trim())) {
+      return res.status(400).json({ ok: false, message: "Envíe una imagen PNG o JPG." });
+    }
+    const carpeta = path.join(__dirname, "..", "..", "assets");
+    fs.mkdirSync(carpeta, { recursive: true });
+    ["logo-regimen.png", "logo-regimen.jpg", "logo-regimen.jpeg"]
+      .forEach((n) => { try { fs.unlinkSync(path.join(carpeta, n)); } catch (_) { /* no existía */ } });
+    fs.writeFileSync(path.join(carpeta, tipo.includes("png") ? "logo-regimen.png" : "logo-regimen.jpg"), req.body);
+    return res.json({ ok: true, message: "Logo actualizado correctamente." });
+  }
+);
 
 router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);

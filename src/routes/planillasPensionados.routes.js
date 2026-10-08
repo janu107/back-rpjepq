@@ -16,6 +16,7 @@ router.post("/deuda-historica/masivo", ADMIN_ONLY, auditAction("PLANILLA_PENSION
 
 // Planillas CRUD
 router.get("/",   ADMIN_OP, controller.list);
+router.get("/tipos-monto", ADMIN_OP, controller.getTiposMonto);
 router.post("/",  ADMIN_OP, auditAction("PLANILLA_PENSIONADOS", "CREAR", "Crear planilla pensionados"), controller.create);
 
 // Rutas por :id con sub-rutas específicas (antes del GET /:id base)

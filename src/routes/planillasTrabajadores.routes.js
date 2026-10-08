@@ -11,6 +11,7 @@ const ADMIN_OP = authorizeRoles("ADMIN", "OPERADOR");
 
 // Planillas CRUD
 router.get("/",   ADMIN_OP, controller.list);
+router.get("/tipos-monto", ADMIN_OP, controller.getTiposMonto);
 router.post("/",  ADMIN_OP, auditAction("PLANILLA_EMPLEADOS", "CREAR", "Crear planilla empleados"), controller.create);
 
 // Rutas por :id con sub-rutas específicas (antes del GET /:id base)

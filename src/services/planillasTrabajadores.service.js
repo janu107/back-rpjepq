@@ -1,5 +1,6 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
+const tiposMonto = require("./tiposMonto.service");
 const getSql = require("../utils/sqlLoader");
 const ExcelJS = require("exceljs");
 const { assertCan, createError } = require("../utils/planillaEstado");
@@ -225,6 +226,8 @@ const reversarEmpleado = async (id, idEmpleado, motivo, currentUser) => {
 };
 
 // CAMBIO X: renglones de ingreso/descuento de un empleado para edición de montos.
+const getTiposMonto = () => tiposMonto.listarTiposMonto();
+
 const getMontos = async (id, idEmpleado) => {
   const [rows] = await pool.execute(sql("montosEmpleado"), [id, idEmpleado, id, idEmpleado]);
   return rows.map((r) => ({
@@ -243,7 +246,9 @@ const editarMontos = async (id, idEmpleado, payload, currentUser) => {
 
   const ingresos = Array.isArray(payload?.ingresos) ? payload.ingresos : [];
   const descuentos = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
-  if (!ingresos.length && !descuentos.length) throw createError("No se recibieron montos para actualizar");
+  // Renglones agregados a mano (tipo de ingreso o descuento que no generó el proceso).
+  const nuevos = tiposMonto.validarNuevos(payload?.nuevos, createError);
+  if (!ingresos.length && !descuentos.length && !nuevos.length) throw createError("No se recibieron montos para actualizar");
 
   const valido = (v) => v !== undefined && v !== null && !Number.isNaN(Number(v)) && Number(v) >= 0;
   for (const ing of ingresos) if (!valido(ing.valor)) throw createError("Los montos de ingreso deben ser números mayores o iguales a 0");
@@ -261,6 +266,12 @@ const editarMontos = async (id, idEmpleado, payload, currentUser) => {
     }
     for (const des of descuentos) {
       await conn.execute(sql("actualizarMontoDescuento"), [toNum(des.valor), des.id, id, idEmpleado]);
+    }
+    for (const n of nuevos) {
+      const [res] = n.clase === "INGRESO"
+        ? await conn.execute(sql("agregarIngreso"), [n.tipo, n.valor, n.valor, n.valor, usuario, id, idEmpleado])
+        : await conn.execute(sql("agregarDescuento"), [n.tipo, n.valor, usuario, id, idEmpleado]);
+      if (!res.affectedRows) throw createError("No se pudo agregar el renglón: la persona no tiene pagos en esta planilla");
     }
     await conn.commit();
   } catch (e) {
@@ -321,6 +332,7 @@ const exportBanco = async (id) => {
 };
 
 module.exports = {
+  getTiposMonto,
   list, getById, create, update, preview,
   generar, getDetalle, cerrar, reversar, reversarEmpleado,
   getMontos, editarMontos,

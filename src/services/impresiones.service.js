@@ -241,16 +241,23 @@ const getNominaTiempoExtra = async (idPlanilla) => {
 };
 
 const pdfNominaTiempoExtra = async (idPlanilla, opciones = {}, user) => {
-  const { planilla, filas } = await getNominaTiempoExtra(idPlanilla);
-  if (!filas.length) throw createError("La planilla no tiene renglones de tiempo extra para imprimir", 409);
+  const { planilla, filas: todas } = await getNominaTiempoExtra(idPlanilla);
+  if (!todas.length) throw createError("La planilla no tiene renglones de tiempo extra para imprimir", 409);
+
+  // Igual que la nómina de sueldos: vacío = todas las áreas agrupadas; con un
+  // área, sólo esa y su nombre al centro del encabezado.
+  const areaPedida = String(opciones.area || "").trim().toUpperCase();
+  const filas = areaPedida ? todas.filter((f) => String(f.area).toUpperCase() === areaPedida) : todas;
+  if (!filas.length) throw createError(`La planilla no tiene tiempo extra del área ${areaPedida}`, 409);
 
   const firmas = parsearFirmas(opciones.firmas);
-  const porArea = String(opciones.porArea ?? "true") !== "false";
+  const porArea = !areaPedida && String(opciones.porArea ?? "true") !== "false";
   const doc = pdf.nuevoDoc(pdf.OFICIO);
   const columnas = COLS_EXTRA(doc);
 
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "NOMINA DE TIEMPO EXTRAORDINARIO - EMPLEADOS DE REGIMEN",
+    area: areaPedida || null,
     subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`
   });
   cabecera(doc);
@@ -411,7 +418,11 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
   doc.y = y + 20;
   doc.x = x0;
 
-  const anchos = pdf.repartirAnchos(doc, [15, 45, 40]);
+  // La tabla (3 columnas) va centrada en la hoja con un ancho fijo, en vez de
+  // estirarse a todo el ancho con mucho espacio vacío entre columnas.
+  const anchoTabla = 330;
+  const margenExtra = Math.max(0, (pdf.anchoUtil(doc) - anchoTabla) / 2);
+  const anchos = [anchoTabla * 0.15, anchoTabla * 0.45, anchoTabla * 0.40];
   const columnas = [
     { titulo: "No.", campo: "no", align: "right", ancho: anchos[0] },
     { titulo: "FECHA DE PAGO", campo: "fecha_pago", align: "center", ancho: anchos[1], valor: (f) => fecha(f.fecha_pago) },
@@ -421,9 +432,11 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
   if (!movimientos.length) {
     doc.font("Helvetica-Oblique").fontSize(8).text("El empleado no tiene aportaciones registradas.");
   } else {
-    pdf.dibujarTabla(doc, columnas, movimientos.map((m, i) => ({ ...m, no: i + 1 })),
-      { fuente: 7.5, alturaFila: 13, reservaInferior: 40, alRepetirEncabezado: cabecera });
-    pdf.filaTotales(doc, columnas, { monto: `Q ${q(total)}` }, `TOTAL (${movimientos.length} aportes)`, 2);
+    pdf.conMargenLateral(doc, margenExtra, () => {
+      pdf.dibujarTabla(doc, columnas, movimientos.map((m, i) => ({ ...m, no: i + 1 })),
+        { fuente: 7.5, alturaFila: 13, reservaInferior: 40, alRepetirEncabezado: cabecera });
+      pdf.filaTotales(doc, columnas, { monto: `Q ${q(total)}` }, `TOTAL (${movimientos.length} aportes)`, 2);
+    });
   }
 
   pdf.pieDePagina(doc, user?.usuario);
