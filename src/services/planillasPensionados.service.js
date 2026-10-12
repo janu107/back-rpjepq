@@ -363,33 +363,45 @@ const estadoCuenta = async (idJubilado) => {
   };
 };
 
-const generarDeudaHistoricaMasivo = async (periodoFinal, porcentaje, currentUser) => {
-  if (!periodoFinal || String(periodoFinal).length !== 6) throw createError("El periodo final debe tener formato YYYYMM");
+// Carga histórica (documento "DEUDA HISTORIAL"): crea las planillas de jubilados
+// mes a mes desde la jubilación más antigua hasta el mes anterior al actual, y la
+// deuda desde el período indicado. Ver sp_carga_historica_jubilados.
+//   periodoDeuda: YYYYMM desde el que se paga el porcentaje (antes, pago completo).
+const generarDeudaHistoricaMasivo = async (periodoDeuda, porcentaje, currentUser) => {
+  const periodo = Number(periodoDeuda);
+  if (!/^\d{6}$/.test(String(periodoDeuda || "")) || periodo % 100 < 1 || periodo % 100 > 12) {
+    throw createError("El período debe tener formato YYYYMM (ej. 202303)");
+  }
   const pct = toNum(porcentaje);
   if (pct <= 0 || pct > 100) throw createError("El porcentaje debe estar entre 1 y 100");
   const usuario = currentUser?.usuario || "sistema";
-  logger.info("Generando deuda historica masivo", { periodoFinal, porcentaje: pct, usuario });
+  logger.info("Carga histórica de jubilados", { periodoDeuda: periodo, porcentaje: pct, usuario });
 
   const out = await callSp(
-    `sp_generar_deuda_historica_masivo(?, ?, ?, @p_jub, @p_deu, @p_omi)`,
-    [Number(periodoFinal), pct, usuario],
-    ["p_jub", "p_deu", "p_omi"]
+    `sp_carga_historica_jubilados(?, ?, ?, @p_jub, @p_pla, @p_ren, @p_deu, @p_eli, @p_aju, @p_ini, @p_fin)`,
+    [periodo, pct, usuario],
+    ["p_jub", "p_pla", "p_ren", "p_deu", "p_eli", "p_aju", "p_ini", "p_fin"]
   );
 
-  // Jubilados activos sin pensión configurada (salario tipo de ingreso 1): no
-  // generan deuda. Se informa para que no parezca que la carga "no hizo nada".
+  // Jubilados activos sin pensión configurada: se omiten hasta que tengan valor.
   const [[sinPension]] = await pool.query(
     `SELECT COUNT(*) AS total FROM RPJ_MNT_JUBILADO j
       WHERE j.jub_tipo_manejo = 2 AND UPPER(COALESCE(j.jub_estado,'')) = 'ACTIVO'
         AND NOT EXISTS (SELECT 1 FROM RPJ_MNT_SALARIO s
-                         WHERE s.sal_id_jubilado = j.jub_correlativo AND s.sal_salario > 0)`
+                         WHERE s.sal_id_jubilado = j.jub_correlativo AND s.sal_tipo_manejo = 2
+                           AND s.sal_tipo_ingreso = 1 AND s.sal_salario > 0)`
   );
 
   return {
-    sinPension: toNum(sinPension.total),
     jubiladosProcesados: toNum(out.p_jub),
+    planillasCreadas: toNum(out.p_pla),
+    renglones: toNum(out.p_ren),
     totalDeudas: toNum(out.p_deu),
-    omitidos: toNum(out.p_omi)
+    deudasEliminadas: toNum(out.p_eli),
+    deudasAjustadas: toNum(out.p_aju),
+    periodoInicio: out.p_ini ? Number(out.p_ini) : null,
+    periodoFin: out.p_fin ? Number(out.p_fin) : null,
+    sinPension: toNum(sinPension.total)
   };
 };
 

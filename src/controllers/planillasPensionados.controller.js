@@ -99,8 +99,9 @@ const estadoCuenta = async (req, res, next) => {
 
 const generarDeudaHistoricaMasivo = async (req, res, next) => {
   try {
-    const { periodoFinal, porcentaje } = req.body;
-    const data = await service.generarDeudaHistoricaMasivo(periodoFinal, porcentaje, req.user);
+    // periodoDeuda: desde qué mes se paga el porcentaje (se acepta periodoFinal por compatibilidad).
+    const { periodoDeuda, periodoFinal, porcentaje } = req.body;
+    const data = await service.generarDeudaHistoricaMasivo(periodoDeuda ?? periodoFinal, porcentaje, req.user);
     return successResponse(res, data, "Deuda histórica generada correctamente");
   } catch (e) { next(e); }
 };
