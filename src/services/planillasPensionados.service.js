@@ -363,6 +363,45 @@ const estadoCuenta = async (idJubilado) => {
   };
 };
 
+// Antes de la carga histórica se revisa que la base tenga lo que el procedimiento
+// necesita. Sin esto, en producción cualquier faltante (migración sin correr,
+// columna que no existe) llegaba a la pantalla como "Error interno del servidor".
+const REQUISITOS_CARGA = {
+  RPJ_MNT_JUBILADO: ["jub_correlativo", "jub_tipo_manejo", "jub_estado", "jub_tipo_pago", "jub_estado_pago", "jub_fecha_jubilacion"],
+  RPJ_MNT_SALARIO: ["sal_id_jubilado", "sal_tipo_manejo", "sal_tipo_ingreso", "sal_salario", "sal_correlativo"],
+  RPJ_CAT_PARAMETRO_PLANILLA: ["ppl_tipo_planilla", "ppl_numero", "ppl_estado", "ppl_aplica_porcentaje", "ppl_porcentaje_pago",
+    "ppl_estado_proceso", "ppl_fecha_generacion", "ppl_fecha_cierre", "ppl_usuario_genera", "ppl_usuario_cierra"],
+  RPJ_PRC_NOMINA_INGRESO: ["nin_valor_teorico", "nin_porcentaje_aplicado", "nin_pago_corriente", "nin_abono_historico", "nin_id_deuda_aplicada"],
+  RPJ_PRC_DEUDA_JUBILADO: ["deu_id_jubilado", "deu_periodo", "deu_monto_original", "deu_monto_pagado", "deu_monto_pendiente",
+    "deu_estado", "deu_tipo_pago", "deu_fecha_generacion", "deu_observaciones", "deu_usuario_creacion"],
+  RPJ_PRC_APLICACION_PAGO: ["apa_id_deuda"]
+};
+
+const verificarRequisitosCarga = async () => {
+  const [rutinas] = await pool.query(
+    `SELECT ROUTINE_NAME FROM information_schema.ROUTINES
+      WHERE ROUTINE_SCHEMA = DATABASE() AND LOWER(ROUTINE_NAME) = 'sp_carga_historica_jubilados'`
+  );
+  if (!rutinas.length) {
+    throw createError("Falta instalar el procedimiento de carga histórica en la base de datos. En el servidor ejecute: node scripts/runSqlFile.js sql/migraciones/migration_carga_historica_jubilados.sql", 409);
+  }
+
+  const [cols] = await pool.query(
+    `SELECT UPPER(TABLE_NAME) AS tabla, LOWER(COLUMN_NAME) AS columna FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) IN (${Object.keys(REQUISITOS_CARGA).map(() => "?").join(", ")})`,
+    Object.keys(REQUISITOS_CARGA)
+  );
+  const existentes = new Set(cols.map((c) => `${c.tabla}.${c.columna}`));
+  const faltantes = [];
+  Object.entries(REQUISITOS_CARGA).forEach(([tabla, columnas]) => {
+    if (!cols.some((c) => c.tabla === tabla)) { faltantes.push(`tabla ${tabla}`); return; }
+    columnas.forEach((c) => { if (!existentes.has(`${tabla}.${c}`)) faltantes.push(`${tabla}.${c}`); });
+  });
+  if (faltantes.length) {
+    throw createError(`La base de datos no tiene lo necesario para la carga histórica. Falta: ${faltantes.join(", ")}`, 409);
+  }
+};
+
 // Carga histórica (documento "DEUDA HISTORIAL"): crea las planillas de jubilados
 // mes a mes desde la jubilación más antigua hasta el mes anterior al actual, y la
 // deuda desde el período indicado. Ver sp_carga_historica_jubilados.
@@ -377,11 +416,22 @@ const generarDeudaHistoricaMasivo = async (periodoDeuda, porcentaje, currentUser
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Carga histórica de jubilados", { periodoDeuda: periodo, porcentaje: pct, usuario });
 
-  const out = await callSp(
+  await verificarRequisitosCarga();
+
+  let out;
+  try {
+    out = await callSp(
     `sp_carga_historica_jubilados(?, ?, ?, @p_jub, @p_pla, @p_ren, @p_deu, @p_eli, @p_aju, @p_ini, @p_fin)`,
     [periodo, pct, usuario],
     ["p_jub", "p_pla", "p_ren", "p_deu", "p_eli", "p_aju", "p_ini", "p_fin"]
   );
+  } catch (error) {
+    // Operación de administrador: se muestra el motivo real de la base en vez del
+    // genérico "Error interno del servidor", para poder corregirlo.
+    logger.error("Falló la carga histórica de jubilados", { code: error.code, sqlMessage: error.sqlMessage, message: error.message });
+    if (error.status) throw error;
+    throw createError(`No se pudo completar la carga histórica: ${error.sqlMessage || error.message}`, 409);
+  }
 
   // Jubilados activos sin pensión configurada: se omiten hasta que tengan valor.
   const [[sinPension]] = await pool.query(
