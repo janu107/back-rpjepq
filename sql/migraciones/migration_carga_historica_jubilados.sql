@@ -74,7 +74,7 @@ BEGIN
   DROP TEMPORARY TABLE IF EXISTS tmp_hist_jub;
   CREATE TEMPORARY TABLE tmp_hist_jub (
     id_jubilado  INT PRIMARY KEY,
-    pension      DECIMAL(12,2) NOT NULL,
+    pension      DECIMAL(12,2) NULL,       -- NULL = sin pension configurada (se descarta abajo)
     fecha_jub    DATE NOT NULL,
     periodo_ini  INT NOT NULL
   );
