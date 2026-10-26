@@ -13,7 +13,7 @@ const historiaCompleta = async (req, res, next) => { try { return successRespons
 const fallecimiento = async (req, res, next) => { try { return successResponse(res, await service.registrarFallecimiento(req.params.id, req.body, req.user), "FALLECIMIENTO REGISTRADO CORRECTAMENTE"); } catch (e) { next(e); } };
 const estadoCuentaPdf = async (req, res, next) => {
   try {
-    const buffer = await service.generarEstadoCuentaPdf(req.params.id);
+    const buffer = await service.generarEstadoCuentaPdf(req.params.id, req.user?.usuario);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="estado_cuenta_${req.params.id}.pdf"`);
     res.send(buffer);

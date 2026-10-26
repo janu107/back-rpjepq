@@ -254,44 +254,121 @@ const registrarFallecimiento = async (id, body, currentUser) => {
   return { beneficiariosActivados: toNum(out.p_ben), message: out.p_res };
 };
 
-// PDF de estado de cuenta (pdfkit). Reutiliza resumenFinanciero + historiaCompleta.
-const generarEstadoCuentaPdf = async (id) => {
+// PDF de estado de cuenta (carta). Mismo estilo de los reportes formales
+// (utils/pdfLayout): encabezado institucional con logo, datos del jubilado,
+// resumen, explicación y el detalle mes a mes de la deuda.
+const generarEstadoCuentaPdf = async (id, usuario) => {
+  const L = require("../utils/pdfLayout");
   const resumen = await resumenFinanciero(id);
-  const deudas = await historiaCompleta(id);
-  const Q = (n) => `Q${Number(n || 0).toFixed(2)}`;
-  const perF = (p) => { const s = String(p); return s.length === 6 ? `${s.slice(4, 6)}/${s.slice(0, 4)}` : s; };
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40, size: "LETTER" });
-    const chunks = [];
-    doc.on("data", (c) => chunks.push(c));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
+  const historia = await historiaCompleta(id);
+  const [[jub]] = await pool.execute(
+    "SELECT jub_fecha_jubilacion AS fechaJubilacion FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]);
 
-    doc.fontSize(16).fillColor("#1F4E79").text("Estado de Cuenta — Jubilado", { align: "center" });
-    doc.moveDown(0.5).fillColor("#000").fontSize(10);
-    doc.text(`Jubilado: ${resumen.nombreCompleto}`);
-    doc.text(`DPI: ${resumen.dpi || ""}`);
-    doc.text(`Tipo de pago: ${resumen.tipoPago}    Estado de pago: ${resumen.estadoPago}`);
+  const MES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  const per = (p) => { const n = Number(p); return `${MES[(n % 100) - 1]}-${Math.floor(n / 100)}`; };
+  const Q = (n) => `Q ${L.q(n)}`;
 
-    doc.moveDown(0.6).fontSize(12).fillColor("#1F4E79").text("Resumen financiero");
-    doc.fillColor("#000").fontSize(10);
-    doc.text(`Pensión mensual: ${Q(resumen.pension)}`);
-    doc.text(`Total pagado: ${Q(resumen.totalPagado)}`);
-    doc.text(`Meses en deuda: ${resumen.periodosDeuda}    Meses de historia: ${resumen.periodosHistoria}`);
-    doc.moveDown(0.2).fontSize(12).fillColor(resumen.deudaPendiente > 0 ? "#F44336" : "#4CAF50")
-      .text(`SALDO PENDIENTE: ${Q(resumen.deudaPendiente)}`);
+  const completos = historia.filter((h) => !h.esDeuda);
+  const deuda = historia.filter((h) => h.esDeuda);
+  const pendientes = deuda.filter((h) => h.saldo > 0);
+  const totalDevengado = deuda.reduce((s, h) => s + h.montoGenerado, 0);
+  const totalAbonado = deuda.reduce((s, h) => s + h.montoPagado, 0);
+  const totalRecibido = deuda.reduce((s, h) => s + h.recibidoMes, 0);
+  const saldo = deuda.reduce((s, h) => s + h.saldo, 0);
 
-    doc.moveDown(0.6).fontSize(12).fillColor("#1F4E79").text("Detalle de deuda / historia");
-    doc.fillColor("#000").fontSize(9);
-    doc.text("Período | Pensión completa | Líquido del mes | Abonado al mes | Saldo | Estado | Tipo");
-    doc.moveTo(doc.x, doc.y).lineTo(560, doc.y).stroke("#cccccc");
-    deudas.forEach((d) => {
-      const estado = d.esDeuda ? d.estado : "HISTORIA";
-      doc.text(`${perF(d.periodo)} | ${Q(d.pensionCompleta)} | ${Q(d.montoGenerado)} | ${Q(d.montoPagado)} | ${Q(d.saldo)} | ${estado} | ${d.tipoPago}`);
-    });
+  const doc = L.nuevoDoc({ ...L.CARTA, margins: { top: 36, bottom: 40, left: 40, right: 40 } });
+  const x0 = doc.page.margins.left;
+  const ancho = L.anchoUtil(doc);
 
-    doc.end();
+  L.encabezado(doc, {
+    titulo: "Estado de cuenta de jubilado",
+    subtitulo: `Saldo al ${L.fechaLarga()}`
   });
+
+  // --- Datos del jubilado --------------------------------------------------
+  const caja = (y, alto, color = "#F3F6F8") => doc.save().roundedRect(x0, y, ancho, alto, 4).fill(color).restore();
+  let y = doc.y + 4;
+  caja(y, 54);
+  const dato = (etq, val, cx, cy, w) => {
+    doc.font("Helvetica").fontSize(7).fillColor("#5A6B7B").text(etq, cx, cy, { width: w });
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000").text(String(val ?? ""), cx, cy + 9, { width: w, lineBreak: false, ellipsis: true });
+  };
+  const c4 = ancho / 4;
+  dato("Jubilado", resumen.nombreCompleto, x0 + 10, y + 7, c4 * 2 - 10);
+  dato("DPI", resumen.dpi || "-", x0 + c4 * 2, y + 7, c4 - 6);
+  dato("Código", resumen.idJubilado ?? resumen.id, x0 + c4 * 3, y + 7, c4 - 10);
+  dato("Fecha de jubilación", jub?.fechaJubilacion ? L.fecha(jub.fechaJubilacion) : "-", x0 + 10, y + 30, c4 - 10);
+  dato("Pensión mensual", Q(resumen.pension), x0 + c4, y + 30, c4 - 6);
+  dato("Tipo de pago", resumen.tipoPago, x0 + c4 * 2, y + 30, c4 - 6);
+  dato("Estado de pago", resumen.estadoPago, x0 + c4 * 3, y + 30, c4 - 10);
+  y += 64;
+
+  // --- Resumen -------------------------------------------------------------
+  const tarjeta = (i, etq, val, destacado) => {
+    const w = (ancho - 18) / 4;
+    const cx = x0 + i * (w + 6);
+    doc.save().roundedRect(cx, y, w, 42, 4).fill(destacado ? "#FDECEA" : "#FFFFFF").restore();
+    doc.save().roundedRect(cx, y, w, 42, 4).lineWidth(0.6).strokeColor(destacado ? "#E57373" : "#C9D3DC").stroke().restore();
+    doc.font("Helvetica").fontSize(6.8).fillColor("#5A6B7B").text(etq, cx + 6, y + 7, { width: w - 12, align: "center" });
+    doc.font("Helvetica-Bold").fontSize(destacado ? 12 : 10.5).fillColor(destacado ? "#C62828" : "#1F4E5F")
+      .text(val, cx + 6, y + 21, { width: w - 12, align: "center", lineBreak: false });
+  };
+  tarjeta(0, "Total devengado (meses con deuda)", Q(totalDevengado));
+  tarjeta(1, "Total abonado", Q(totalAbonado));
+  tarjeta(2, "Meses con saldo pendiente", `${pendientes.length} de ${deuda.length}`);
+  tarjeta(3, "SALDO PENDIENTE", Q(saldo), true);
+  y += 50;
+
+  // --- Explicación ---------------------------------------------------------
+  doc.font("Helvetica").fontSize(7).fillColor("#333333");
+  const desde = deuda.length ? per(deuda[0].periodo) : "-";
+  const masAntiguo = pendientes.length ? per(pendientes[0].periodo) : "ninguno";
+  const lineasCompletos = completos.length
+    ? `Meses pagados completos (sin deuda): ${per(completos[0].periodo)} a ${per(completos[completos.length - 1].periodo)} (${completos.length} meses). `
+    : "";
+  doc.text(
+    `${lineasCompletos}Desde ${desde} cada mes vale su líquido (pensión menos descuentos) y en cada planilla se paga el ` +
+    `porcentaje vigente; lo recibido se abona al mes pendiente más antiguo. Mes pendiente más antiguo: ${masAntiguo}.`,
+    x0, y, { width: ancho, align: "justify" });
+  doc.y += 8;
+
+  // --- Detalle -------------------------------------------------------------
+  doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F4E5F").text("Detalle mensual de la deuda", x0, doc.y);
+  doc.moveDown(0.3).fillColor("#000000");
+  const anchos = L.repartirAnchos(doc, [1.1, 1.2, 1.1, 1.2, 1.3, 1.2, 1.2, 1.1]);
+  const columnas = [
+    { titulo: "Período", campo: "periodoTxt" },
+    { titulo: "Pensión", campo: "pension", align: "right" },
+    { titulo: "Descuentos", campo: "descuentos", align: "right" },
+    { titulo: "Líquido del mes", campo: "liquido", align: "right" },
+    { titulo: "Recibido en la planilla", campo: "recibido", align: "right" },
+    { titulo: "Abonado al mes", campo: "abonado", align: "right" },
+    { titulo: "Saldo", campo: "saldo", align: "right" },
+    { titulo: "Estado", campo: "estado", align: "center" }
+  ].map((c, i) => ({ ...c, ancho: anchos[i] }));
+  const filas = deuda.map((h) => ({
+    periodoTxt: per(h.periodo),
+    pension: L.q(h.pensionCompleta),
+    descuentos: L.q(Math.max(h.pensionCompleta - h.montoGenerado, 0)),
+    liquido: L.q(h.montoGenerado),
+    recibido: L.q(h.recibidoMes),
+    abonado: L.q(h.montoPagado),
+    saldo: L.q(h.saldo),
+    estado: h.estado
+  }));
+  if (filas.length) {
+    L.dibujarTabla(doc, columnas, filas, { fuente: 7, alturaFila: 13, altoEncabezado: 20, reservaInferior: 10 });
+    L.filaTotales(doc, columnas, {
+      liquido: L.q(totalDevengado), recibido: L.q(totalRecibido), abonado: L.q(totalAbonado), saldo: L.q(saldo), estado: ""
+    }, "TOTALES", 3);
+  } else {
+    doc.font("Helvetica").fontSize(8).text("El jubilado no tiene meses con deuda registrados.", x0, doc.y);
+  }
+
+  doc.moveDown(2);
+  L.bloqueFirmas(doc, [{ rol: "Elaborado por" }, { rol: "Revisado por" }]);
+  L.pieDePagina(doc, usuario);
+  return L.aBuffer(doc);
 };
 
 module.exports = {
