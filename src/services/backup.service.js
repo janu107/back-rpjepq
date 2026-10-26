@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const zlib = require("zlib");
 const { spawn } = require("child_process");
 
@@ -66,12 +67,8 @@ const registerHistory = async ({ archivo, tipo, tamano, user, accion, observacio
   ]);
 };
 
-// La contraseña va por MYSQL_PWD y no como argumento "-p...", que cualquier
-// usuario del servidor puede ver con `ps`.
 const runCommand = (command, args, options = {}) => new Promise((resolve, reject) => {
-  const env = { ...process.env };
-  if (process.env.DB_PASSWORD) env.MYSQL_PWD = process.env.DB_PASSWORD;
-  const child = spawn(command, args, { ...options, env, windowsHide: true });
+  const child = spawn(command, args, { ...options, windowsHide: true });
   let stderr = "";
   child.stderr?.on("data", (chunk) => {
     stderr += chunk.toString();
@@ -83,13 +80,31 @@ const runCommand = (command, args, options = {}) => new Promise((resolve, reject
   });
 });
 
-const dbArgs = () => {
-  const args = [
-    "-h", process.env.DB_HOST || "localhost",
-    "-P", String(process.env.DB_PORT || 3306),
-    "-u", process.env.DB_USER || "root"
+// Ejecuta mysql/mysqldump con las credenciales del .env en un archivo de opciones
+// temporal (permisos 600, se borra al terminar):
+// - la contraseña no va como argumento "-p...", que cualquiera ve con `ps`;
+// - --defaults-file hace que se ignore ~/.my.cnf (en el servidor, el de root fuerza
+//   user=root y pisaba las credenciales; MYSQL_PWD tampoco sirve por eso).
+const optionValue = (value) => `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+const runDbCommand = async (command, args, options = {}) => {
+  const lines = [
+    "[client]",
+    `host=${optionValue(process.env.DB_HOST || "localhost")}`,
+    `port=${Number(process.env.DB_PORT || 3306)}`,
+    `user=${optionValue(process.env.DB_USER || "root")}`
   ];
-  return args;
+  if (process.env.DB_PASSWORD) lines.push(`password=${optionValue(process.env.DB_PASSWORD)}`);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpj-db-"));
+  const optionsFile = path.join(dir, "client.cnf");
+  fs.writeFileSync(optionsFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+  try {
+    // --defaults-file debe ser el primer argumento.
+    await runCommand(command, [`--defaults-file=${optionsFile}`, ...args], options);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 };
 
 const gzipFile = (source, target) => new Promise((resolve, reject) => {
@@ -112,7 +127,7 @@ const generar = async (user, tipo = "MANUAL", observacion = null) => {
   logger.info("Generando backup de base de datos", { dbName, user: user?.usuario, tipo });
   const outFd = fs.openSync(filePath, "w");
   try {
-    await runCommand("mysqldump", [...dbArgs(), dbName], { stdio: ["ignore", outFd, "pipe"] });
+    await runDbCommand("mysqldump", ["--single-transaction", "--routines", "--triggers", dbName], { stdio: ["ignore", outFd, "pipe"] });
     await gzipFile(filePath, gzPath);
   } catch (error) {
     if (fs.existsSync(gzPath)) fs.unlinkSync(gzPath);
@@ -227,7 +242,7 @@ const restaurar = async (file, user) => {
   let inFd;
   try {
     inFd = fs.openSync(restorePath, "r");
-    await runCommand("mysql", [...dbArgs(), process.env.DB_NAME || "apps_rpjepq"], {
+    await runDbCommand("mysql", [process.env.DB_NAME || "apps_rpjepq"], {
       stdio: [inFd, "ignore", "pipe"]
     });
     await registerHistory({ archivo: originalName, tipo: "RESTAURACION", tamano: formatBytes(file.size), user, accion: "RESTAURADO" });

@@ -79,7 +79,10 @@
 - **`app.js`:** se sube al repo la versión que estaba solo en el servidor (commit local
   `ee1a2ad`: CORS de producción + `trust proxy` = 1), para que el repo y producción coincidan.
 - **Backups:** se borra el `.sql` sin comprimir tras generar el `.gz`; se cierran los archivos
-  abiertos; la contraseña de la BD se pasa por `MYSQL_PWD` y no aparece en `ps`.
+  abiertos; las credenciales van en un archivo de opciones temporal (600) con
+  `--defaults-file`, así no aparecen en `ps` y se ignora el `~/.my.cnf` de root del servidor
+  (fuerza `user=root`). El dump ahora incluye `--routines` (los SP del sistema) y
+  `--single-transaction` (sin bloquear tablas).
 - **Limpieza:** se eliminó la carpeta suelta `front-rpjepq/` dentro del backend y se ignoran
   los `.DS_Store`.
 - **Sesiones al día:** `auth.middleware` confirma contra la base, en cada petición (caché de
