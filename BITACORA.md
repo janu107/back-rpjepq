@@ -76,8 +76,8 @@
 - **`/api/health/db`** (público) ya no devuelve el error de MySQL ni nombre/versión de la base.
 - **Dependencias:** `npm audit fix` (proxy-addr, multer, body-parser, qs, mysql2…). Queda
   `uuid` vía `exceljs`, que solo usa v4 y no está afectado.
-- **`trust proxy`:** activado por defecto en producción (variable `TRUST_PROXY`), para que el
-  límite de intentos de login cuente por IP real del usuario y no por la de nginx.
+- **`app.js`:** se sube al repo la versión que estaba solo en el servidor (commit local
+  `ee1a2ad`: CORS de producción + `trust proxy` = 1), para que el repo y producción coincidan.
 - **Backups:** se borra el `.sql` sin comprimir tras generar el `.gz`; se cierran los archivos
   abiertos; la contraseña de la BD se pasa por `MYSQL_PWD` y no aparece en `ps`.
 - **Limpieza:** se eliminó la carpeta suelta `front-rpjepq/` dentro del backend y se ignoran
