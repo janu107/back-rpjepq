@@ -105,7 +105,7 @@ const createInitialAdmin = async () => {
   const adminUser = process.env.ADMIN_USER || "admin";
   const adminName = process.env.ADMIN_NAME || "Administrador RPJEPQ";
   const adminEmail = process.env.ADMIN_EMAIL || "admin@rpjepq.com";
-  const adminPassword = process.env.ADMIN_PASSWORD || "Admin123!";
+  const adminPassword = process.env.ADMIN_PASSWORD;
   const adminRole = process.env.ADMIN_ROLE || "ADMIN";
 
   logger.info("Verificando usuario administrador inicial", { usuario: adminUser });
@@ -119,6 +119,11 @@ const createInitialAdmin = async () => {
       created: false,
       user: normalizeUser(existingRows[0])
     };
+  }
+
+  // Sin contraseña por defecto: un valor conocido dejaría la cuenta admin expuesta.
+  if (!adminPassword || adminPassword.length < 10) {
+    throw new Error("ADMIN_PASSWORD no está definida en .env o tiene menos de 10 caracteres; no se creó el usuario administrador");
   }
 
   const hashedPassword = await bcrypt.hash(adminPassword, 10);

@@ -15,12 +15,12 @@ const databaseHealthCheck = async (req, res) => {
     await testConnection();
 
     const query = getSql("health/testConnection.sql");
-    const [rows] = await pool.execute(query);
+    await pool.execute(query);
 
+    // Endpoint público: no se devuelve nombre ni versión de la base.
     res.json({
       ok: true,
-      message: "Conexión a MySQL exitosa",
-      data: rows[0]
+      message: "Conexión a MySQL exitosa"
     });
   } catch (error) {
     logger.error("Error en endpoint /api/health/db", {
@@ -30,8 +30,7 @@ const databaseHealthCheck = async (req, res) => {
 
     res.status(500).json({
       ok: false,
-      message: "Error al conectar con MySQL",
-      error: error.message
+      message: "Error al conectar con la base de datos"
     });
   }
 };
