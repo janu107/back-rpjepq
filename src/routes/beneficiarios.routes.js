@@ -22,6 +22,6 @@ router.post("/registrar", ADMIN_OP, auditAction("BENEFICIARIOS", "REGISTRAR", (r
 router.post("/tutores/registrar", ADMIN_OP, auditAction("BENEFICIARIOS", "TUTOR", "Registro de tutora"), controller.registrarTutor);
 router.post("/:id/suspender", ADMIN_OP, auditAction("BENEFICIARIOS", "SUSPENDER", (req) => `Suspender beneficiario ${req.params.id}`), controller.suspender);
 router.post("/:id/reactivar", ADMIN_OP, auditAction("BENEFICIARIOS", "REACTIVAR", (req) => `Reactivar beneficiario ${req.params.id}`), controller.reactivar);
-router.delete("/:id", ADMIN_OP, auditAction("BENEFICIARIOS", "ELIMINAR", (req) => `Eliminar beneficiario ${req.params.id}`), controller.remove);
+router.delete("/:id", authorizeRoles("ADMIN"), auditAction("BENEFICIARIOS", "ELIMINAR", (req) => `Eliminar beneficiario ${req.params.id}`), controller.remove);
 
 module.exports = router;
