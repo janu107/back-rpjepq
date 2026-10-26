@@ -10,3 +10,5 @@ logs/*.log
 backups/*.sql
 backups/*.gz
 temp/restore/*
+
+.DS_Store

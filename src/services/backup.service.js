@@ -66,8 +66,12 @@ const registerHistory = async ({ archivo, tipo, tamano, user, accion, observacio
   ]);
 };
 
+// La contraseña va por MYSQL_PWD y no como argumento "-p...", que cualquier
+// usuario del servidor puede ver con `ps`.
 const runCommand = (command, args, options = {}) => new Promise((resolve, reject) => {
-  const child = spawn(command, args, { ...options, windowsHide: true });
+  const env = { ...process.env };
+  if (process.env.DB_PASSWORD) env.MYSQL_PWD = process.env.DB_PASSWORD;
+  const child = spawn(command, args, { ...options, env, windowsHide: true });
   let stderr = "";
   child.stderr?.on("data", (chunk) => {
     stderr += chunk.toString();
@@ -85,7 +89,6 @@ const dbArgs = () => {
     "-P", String(process.env.DB_PORT || 3306),
     "-u", process.env.DB_USER || "root"
   ];
-  if (process.env.DB_PASSWORD) args.push(`-p${process.env.DB_PASSWORD}`);
   return args;
 };
 
@@ -107,8 +110,18 @@ const generar = async (user, tipo = "MANUAL", observacion = null) => {
   const gzPath = path.join(backupsDir, gzFile);
 
   logger.info("Generando backup de base de datos", { dbName, user: user?.usuario, tipo });
-  await runCommand("mysqldump", [...dbArgs(), dbName], { stdio: ["ignore", fs.openSync(filePath, "w"), "pipe"] });
-  await gzipFile(filePath, gzPath);
+  const outFd = fs.openSync(filePath, "w");
+  try {
+    await runCommand("mysqldump", [...dbArgs(), dbName], { stdio: ["ignore", outFd, "pipe"] });
+    await gzipFile(filePath, gzPath);
+  } catch (error) {
+    if (fs.existsSync(gzPath)) fs.unlinkSync(gzPath);
+    throw error;
+  } finally {
+    fs.closeSync(outFd);
+    // Solo se conserva el .gz; el .sql sin comprimir duplicaba el espacio en disco.
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  }
 
   const size = fs.statSync(gzPath).size;
   const tamano = formatBytes(size);
@@ -211,9 +224,11 @@ const restaurar = async (file, user) => {
     restorePath = await gunzipToTemp(restorePath);
   }
 
+  let inFd;
   try {
+    inFd = fs.openSync(restorePath, "r");
     await runCommand("mysql", [...dbArgs(), process.env.DB_NAME || "apps_rpjepq"], {
-      stdio: [fs.openSync(restorePath, "r"), "ignore", "pipe"]
+      stdio: [inFd, "ignore", "pipe"]
     });
     await registerHistory({ archivo: originalName, tipo: "RESTAURACION", tamano: formatBytes(file.size), user, accion: "RESTAURADO" });
     logger.info("Base de datos restaurada correctamente", { archivo: originalName, user: user?.usuario });
@@ -222,6 +237,7 @@ const restaurar = async (file, user) => {
     logger.error("No se pudo restaurar la base de datos", { archivo: originalName, message: error.message });
     throw createError("No se pudo restaurar la base de datos", 500);
   } finally {
+    if (inFd !== undefined) fs.closeSync(inFd);
     [file.path, restorePath].forEach((target) => {
       if (target && fs.existsSync(target)) fs.unlinkSync(target);
     });

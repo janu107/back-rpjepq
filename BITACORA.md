@@ -60,10 +60,25 @@
 - **Cambio:** comparar como texto: `tex_tipo_hora = '1'` y `= '2'` (en
   `sql/migraciones/migration_dietas_tiempo_extra.sql`). Sin conversión numérica → sin 1292.
   Funcional: incluye tipo '1'/'2' y excluye los no numéricos.
-- **Aplicado y verificado en PRODUCCIÓN** (SP recreado directamente en 143.198.182.147).
+- **Aplicado y verificado en PRODUCCIÓN** (SP recreado directamente en el servidor de producción).
   También aplicado en la BD local. Falta commitear el archivo de migración al repo.
 
 ### Recordatorio pendiente
 - Fijar en Parámetros Generales: `par_porcentaje_tiempo_extra = 1.50` y
   `par_porcentaje_tiemext_doble = 2.00` (multiplicadores). **Importante:** el generar ya no
   falla, pero si el parámetro sigue en 0.15 los montos de hora extra saldrán bajos.
+
+## 2026-10-25 — Seguridad y mantenimiento
+
+- **Admin sin contraseña por defecto:** `createInitialAdmin` ya no usa `Admin123!`; exige
+  `ADMIN_PASSWORD` (mín. 10 caracteres) para crear el admin. La contraseña del usuario
+  `admin` en producción se cambió (era la de por defecto).
+- **`/api/health/db`** (público) ya no devuelve el error de MySQL ni nombre/versión de la base.
+- **Dependencias:** `npm audit fix` (proxy-addr, multer, body-parser, qs, mysql2…). Queda
+  `uuid` vía `exceljs`, que solo usa v4 y no está afectado.
+- **`trust proxy`:** activado por defecto en producción (variable `TRUST_PROXY`), para que el
+  límite de intentos de login cuente por IP real del usuario y no por la de nginx.
+- **Backups:** se borra el `.sql` sin comprimir tras generar el `.gz`; se cierran los archivos
+  abiertos; la contraseña de la BD se pasa por `MYSQL_PWD` y no aparece en `ps`.
+- **Limpieza:** se eliminó la carpeta suelta `front-rpjepq/` dentro del backend y se ignoran
+  los `.DS_Store`.

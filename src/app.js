@@ -8,6 +8,12 @@ const { notFoundHandler, errorHandler } = require("./middlewares/error.middlewar
 
 const app = express();
 
+// Detrás de nginx, sin esto todas las peticiones llegan con la IP del proxy y el
+// límite de intentos de login bloquea a todos a la vez. Por defecto se confía en
+// un proxy en producción; TRUST_PROXY=0 lo desactiva si la API se expone directo.
+const trustProxy = process.env.TRUST_PROXY ?? (process.env.NODE_ENV === "production" ? "1" : "0");
+app.set("trust proxy", Number(trustProxy) || false);
+
 const allowedOrigins = (process.env.NODE_ENV === "production"
   ? [process.env.FRONTEND_URL || "https://apps-itechs.com"]
   : ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", process.env.FRONTEND_URL].filter(Boolean)
