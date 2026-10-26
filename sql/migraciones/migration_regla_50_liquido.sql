@@ -272,8 +272,10 @@ BEGIN
     SET v_mes = DATE_ADD(v_mes, INTERVAL 1 MONTH);
   END WHILE;
 
-  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido, y todo lo
-  -- pagado desde entonces se aplica del mes más antiguo al más reciente.
+  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido. Lo pagado en
+  -- la planilla de cada mes se abona a ESE mes (así la deuda empieza en el período
+  -- indicado: cada mes queda con la parte no pagada). Si en un mes se pagó más que
+  -- su líquido, el sobrante se abona a los meses pendientes más antiguos.
   DELETE a FROM RPJ_PRC_APLICACION_PAGO a JOIN tmp_hist_jub t ON t.id_jubilado = a.apa_id_jubilado;
   DELETE d FROM RPJ_PRC_DEUDA_JUBILADO d JOIN tmp_hist_jub t ON t.id_jubilado = d.deu_id_jubilado
    WHERE d.deu_periodo <= p_periodo_fin;
@@ -288,15 +290,21 @@ BEGIN
            CASE WHEN x.pagado_mes >= x.liquido THEN 'PAGADA' WHEN x.pagado_mes > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END,
            'NORMAL', CURDATE(), IF(x.pagado_mes >= x.liquido, CURDATE(), NULL), 'Carga historica', p_usuario
       FROM (
-        SELECT f.id_jubilado, f.periodo, f.liquido,
-               LEAST(f.liquido, GREATEST(f.total_pagado - (f.acumulado - f.liquido), 0)) AS pagado_mes
+        SELECT g.id_jubilado, g.periodo, g.liquido,
+               g.propio + LEAST(g.resto, GREATEST(g.sobrante - (g.resto_acum - g.resto), 0)) AS pagado_mes
           FROM (
-            SELECT m.id_jubilado, m.periodo, m.liquido,
-                   SUM(m.liquido) OVER (PARTITION BY m.id_jubilado ORDER BY m.periodo) AS acumulado,
-                   SUM(m.pagado)  OVER (PARTITION BY m.id_jubilado) AS total_pagado
-              FROM tmp_hist_mes m
-             WHERE m.periodo >= p_periodo_deuda
-          ) f
+            SELECT f.*,
+                   SUM(f.resto)  OVER (PARTITION BY f.id_jubilado ORDER BY f.periodo) AS resto_acum,
+                   SUM(f.exceso) OVER (PARTITION BY f.id_jubilado) AS sobrante
+              FROM (
+                SELECT m.id_jubilado, m.periodo, m.liquido,
+                       LEAST(m.pagado, m.liquido)               AS propio,
+                       m.liquido - LEAST(m.pagado, m.liquido)   AS resto,
+                       GREATEST(m.pagado - m.liquido, 0)        AS exceso
+                  FROM tmp_hist_mes m
+                 WHERE m.periodo >= p_periodo_deuda
+              ) f
+          ) g
       ) x
      WHERE x.liquido > 0;
     SET p_deudas = ROW_COUNT();
