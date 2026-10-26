@@ -118,14 +118,19 @@ const resumenFinanciero = async (id) => {
             COALESCE(SUM(deu_monto_original),0) AS deudaGenerada
        FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_id_beneficiario IS NULL`, [id]
   );
-  // Pagos: lo que realmente se le ha pagado en las planillas de jubilados
-  // (incluidas las históricas) y cuántos meses ha tenido pago.
+  // Pagos: lo que realmente recibió (ingreso − descuentos) en las planillas de
+  // jubilados (incluidas las históricas) y cuántos meses ha tenido pago.
   const [[pag]] = await pool.execute(
-    `SELECT COALESCE(SUM(i.nin_valor),0) AS totalPagado, COUNT(DISTINCT p.ppl_numero) AS periodosHistoria
+    `SELECT COALESCE(SUM(i.nin_valor),0)
+            - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
+                          INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p2 ON p2.ppl_correlativo = d.nde_id_planilla
+                         WHERE d.nde_id_jubilado = ? AND d.nde_id_beneficiario IS NULL AND d.nde_tipo_manejo = 2
+                           AND p2.ppl_tipo_planilla IN (2, 4) AND p2.ppl_estado_proceso <> 'REVERSADA'), 0) AS totalPagado,
+            COUNT(DISTINCT p.ppl_numero) AS periodosHistoria
        FROM RPJ_PRC_NOMINA_INGRESO i
        INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
       WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
-        AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'`, [id]
+        AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'`, [id, id]
   );
   return {
     ...mapJubBusqueda(jub),
@@ -143,17 +148,22 @@ const ultimosPagos = async (id, limit) => {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 12, 1), 60);
   const [rows] = await pool.query(
     `SELECT i.nin_correlativo AS id, i.nin_id_planilla AS idPlanilla, p.ppl_numero AS periodo,
-            p.ppl_fecha_pago AS fechaPago, i.nin_valor AS total, i.nin_pago_corriente AS pagoCorriente,
-            i.nin_abono_historico AS abono, i.nin_id_tipo_planilla AS tipoPlanilla
+            p.ppl_fecha_pago AS fechaPago, i.nin_valor AS bruto, i.nin_pago_corriente AS pagoCorriente,
+            i.nin_abono_historico AS abono, i.nin_id_tipo_planilla AS tipoPlanilla,
+            COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
+                       WHERE d.nde_id_planilla = i.nin_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0) AS descuentos
        FROM RPJ_PRC_NOMINA_INGRESO i
        LEFT JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
       WHERE i.nin_id_jubilado = ? AND i.nin_tipo_manejo = 2 AND i.nin_id_beneficiario IS NULL
-      ORDER BY i.nin_correlativo DESC LIMIT ?`,
+        AND (p.ppl_estado_proceso IS NULL OR p.ppl_estado_proceso <> 'REVERSADA')
+      ORDER BY p.ppl_numero DESC, i.nin_correlativo DESC LIMIT ?`,
     [id, lim]
   );
   return rows.map((r) => ({
     id: r.id, idPlanilla: r.idPlanilla, periodo: r.periodo, fechaPago: r.fechaPago,
-    total: toNum(r.total), pagoCorriente: toNum(r.pagoCorriente), abono: toNum(r.abono), tipoPlanilla: r.tipoPlanilla
+    // total = lo que recibió (ingreso − descuentos); pagoCorriente + abono = total.
+    total: toNum(r.bruto) - toNum(r.descuentos), bruto: toNum(r.bruto), descuentos: toNum(r.descuentos),
+    pagoCorriente: toNum(r.pagoCorriente), abono: toNum(r.abono), tipoPlanilla: r.tipoPlanilla
   }));
 };
 
@@ -175,9 +185,12 @@ const deudaDetalle = async (id) => {
 };
 
 // Historia mes a mes del jubilado. Une lo pagado en cada planilla (incluidas las
-// históricas) con la deuda de ese mes:
-//   pensionCompleta = pensión del mes      montoGenerado = deuda que quedó del mes
-//   montoPagado     = lo recibido por ese mes (pago del mes + abonos a su deuda)
+// históricas) con la deuda de ese mes. Regla del líquido (2026-10): cada mes con
+// deuda vale su líquido y lo que se paga en una nómina se abona al mes más antiguo.
+//   pensionCompleta = pensión del mes
+//   montoGenerado   = líquido del mes (con deuda) o lo pagado (meses completos)
+//   montoPagado     = lo abonado a ese mes (con deuda) o lo pagado (meses completos)
+//   recibidoMes     = lo que recibió en la planilla de ese mes (va a la deuda más antigua)
 //   saldo           = lo que aún se debe de ese mes
 //   tipoPago        = COMPLETO o el porcentaje pagado (ej. 50%)
 const historiaCompleta = async (id) => {
@@ -191,7 +204,9 @@ const historiaCompleta = async (id) => {
             MAX(x.deuda_estado) AS deudaEstado
        FROM (
          SELECT p.ppl_numero AS periodo, i.nin_valor_teorico AS pension, i.nin_porcentaje_aplicado AS porcentaje,
-                i.nin_pago_corriente AS pagado_mes, p.ppl_fecha_pago AS fecha_pago,
+                i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
+                                         WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado), 0) AS pagado_mes,
+                p.ppl_fecha_pago AS fecha_pago,
                 NULL AS deuda_id, NULL AS deuda_original, NULL AS deuda_pagada, NULL AS deuda_pendiente, NULL AS deuda_estado
            FROM RPJ_PRC_NOMINA_INGRESO i
            INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
@@ -216,8 +231,9 @@ const historiaCompleta = async (id) => {
       esDeuda: deuda > 0,
       tipoPago: pct === null ? "SIN PAGO" : pct >= 100 ? "COMPLETO" : `${pct}%`,
       pensionCompleta: toNum(r.pensionCompleta),
-      montoGenerado: deuda,
-      montoPagado: toNum(r.pagadoMes) + toNum(r.deudaPagada),
+      montoGenerado: deuda > 0 ? deuda : toNum(r.pagadoMes),
+      montoPagado: deuda > 0 ? toNum(r.deudaPagada) : toNum(r.pagadoMes),
+      recibidoMes: toNum(r.pagadoMes),
       saldo: toNum(r.deudaPendiente),
       estado: r.deudaEstado || "PAGADO",
       fechaGeneracion: r.fechaPago
@@ -267,11 +283,11 @@ const generarEstadoCuentaPdf = async (id) => {
 
     doc.moveDown(0.6).fontSize(12).fillColor("#1F4E79").text("Detalle de deuda / historia");
     doc.fillColor("#000").fontSize(9);
-    doc.text("Período | Pensión completa | Pagado | Saldo | Estado | Tipo");
+    doc.text("Período | Pensión completa | Líquido del mes | Abonado al mes | Saldo | Estado | Tipo");
     doc.moveTo(doc.x, doc.y).lineTo(560, doc.y).stroke("#cccccc");
     deudas.forEach((d) => {
       const estado = d.esDeuda ? d.estado : "HISTORIA";
-      doc.text(`${perF(d.periodo)} | ${Q(d.pensionCompleta)} | ${Q(d.montoPagado)} | ${Q(d.saldo)} | ${estado} | ${d.tipoPago}`);
+      doc.text(`${perF(d.periodo)} | ${Q(d.pensionCompleta)} | ${Q(d.montoGenerado)} | ${Q(d.montoPagado)} | ${Q(d.saldo)} | ${estado} | ${d.tipoPago}`);
     });
 
     doc.end();
