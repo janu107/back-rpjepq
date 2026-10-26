@@ -175,6 +175,8 @@ BEGIN
     periodo     INT NOT NULL,
     liquido     DECIMAL(12,2) NOT NULL,
     pagado      DECIMAL(12,2) NOT NULL,
+    id_planilla INT NULL,                    -- planilla de nómina (regla nueva) del mes
+    fifo        TINYINT NOT NULL DEFAULT 0,  -- 1 = su pago se aplicó a la deuda más antigua
     PRIMARY KEY (id_jubilado, periodo)
   );
 
@@ -267,40 +269,59 @@ BEGIN
                SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
                 WHERE d.nde_id_planilla = v_id_pla AND d.nde_id_jubilado = m.id_jubilado), 0), 0)
        WHERE m.periodo = v_periodo;
+
+      -- Nómina con la regla nueva: el mes vale lo que ella registró y su pago se
+      -- abonó a la deuda más antigua (se respeta al rehacer).
+      UPDATE tmp_hist_mes m
+       INNER JOIN RPJ_PRC_DEUDA_JUBILADO d ON d.deu_id_planilla = v_id_pla AND d.deu_id_jubilado = m.id_jubilado
+         SET m.liquido = d.deu_monto_original, m.fifo = 1, m.id_planilla = v_id_pla
+       WHERE m.periodo = v_periodo;
     END IF;
 
     SET v_mes = DATE_ADD(v_mes, INTERVAL 1 MONTH);
   END WHILE;
 
-  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido. Lo pagado en
-  -- la planilla de cada mes se abona a ESE mes (así la deuda empieza en el período
-  -- indicado: cada mes queda con la parte no pagada). Si en un mes se pagó más que
-  -- su líquido, el sobrante se abona a los meses pendientes más antiguos.
+  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido.
+  --   - Meses de la carga histórica (o planillas anteriores a la regla nueva): lo
+  --     pagado se abona a ESE mes, así la deuda empieza en el período indicado.
+  --   - Nóminas con la regla nueva: su pago se abona a los meses más antiguos,
+  --     igual que cuando se generaron (repetir la carga no las mueve).
+  -- Nóminas cerradas (regla nueva) de meses posteriores al rango (p. ej. el mes en curso).
+  INSERT IGNORE INTO tmp_hist_mes (id_jubilado, periodo, liquido, pagado, id_planilla, fifo)
+  SELECT d.deu_id_jubilado, d.deu_periodo, d.deu_monto_original,
+         GREATEST(COALESCE((SELECT SUM(i.nin_valor) FROM RPJ_PRC_NOMINA_INGRESO i
+                             WHERE i.nin_id_planilla = d.deu_id_planilla AND i.nin_id_jubilado = d.deu_id_jubilado), 0)
+                - COALESCE((SELECT SUM(n.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO n
+                             WHERE n.nde_id_planilla = d.deu_id_planilla AND n.nde_id_jubilado = d.deu_id_jubilado), 0), 0),
+         d.deu_id_planilla, 1
+    FROM RPJ_PRC_DEUDA_JUBILADO d
+    JOIN tmp_hist_jub t ON t.id_jubilado = d.deu_id_jubilado
+   WHERE d.deu_id_planilla IS NOT NULL AND d.deu_periodo > p_periodo_fin;
+
   DELETE a FROM RPJ_PRC_APLICACION_PAGO a JOIN tmp_hist_jub t ON t.id_jubilado = a.apa_id_jubilado;
-  DELETE d FROM RPJ_PRC_DEUDA_JUBILADO d JOIN tmp_hist_jub t ON t.id_jubilado = d.deu_id_jubilado
-   WHERE d.deu_periodo <= p_periodo_fin;
+  DELETE d FROM RPJ_PRC_DEUDA_JUBILADO d JOIN tmp_hist_jub t ON t.id_jubilado = d.deu_id_jubilado;
   SET p_deudas_eliminadas = ROW_COUNT();
 
   IF p_porcentaje < 100 THEN
     INSERT INTO RPJ_PRC_DEUDA_JUBILADO (
-      deu_id_jubilado, deu_periodo, deu_monto_original, deu_monto_pagado, deu_monto_pendiente,
+      deu_id_jubilado, deu_periodo, deu_id_planilla, deu_monto_original, deu_monto_pagado, deu_monto_pendiente,
       deu_estado, deu_tipo_pago, deu_fecha_generacion, deu_fecha_saldada, deu_observaciones, deu_usuario_creacion
     )
-    SELECT x.id_jubilado, x.periodo, x.liquido, x.pagado_mes, x.liquido - x.pagado_mes,
+    SELECT x.id_jubilado, x.periodo, x.id_planilla, x.liquido, x.pagado_mes, x.liquido - x.pagado_mes,
            CASE WHEN x.pagado_mes >= x.liquido THEN 'PAGADA' WHEN x.pagado_mes > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END,
            'NORMAL', CURDATE(), IF(x.pagado_mes >= x.liquido, CURDATE(), NULL), 'Carga historica', p_usuario
       FROM (
-        SELECT g.id_jubilado, g.periodo, g.liquido,
+        SELECT g.id_jubilado, g.periodo, g.id_planilla, g.liquido,
                g.propio + LEAST(g.resto, GREATEST(g.sobrante - (g.resto_acum - g.resto), 0)) AS pagado_mes
           FROM (
             SELECT f.*,
                    SUM(f.resto)  OVER (PARTITION BY f.id_jubilado ORDER BY f.periodo) AS resto_acum,
                    SUM(f.exceso) OVER (PARTITION BY f.id_jubilado) AS sobrante
               FROM (
-                SELECT m.id_jubilado, m.periodo, m.liquido,
-                       LEAST(m.pagado, m.liquido)               AS propio,
-                       m.liquido - LEAST(m.pagado, m.liquido)   AS resto,
-                       GREATEST(m.pagado - m.liquido, 0)        AS exceso
+                SELECT m.id_jubilado, m.periodo, m.id_planilla, m.liquido,
+                       IF(m.fifo = 1, 0, LEAST(m.pagado, m.liquido))                         AS propio,
+                       m.liquido - IF(m.fifo = 1, 0, LEAST(m.pagado, m.liquido))             AS resto,
+                       IF(m.fifo = 1, m.pagado, GREATEST(m.pagado - m.liquido, 0))           AS exceso
                   FROM tmp_hist_mes m
                  WHERE m.periodo >= p_periodo_deuda
               ) f

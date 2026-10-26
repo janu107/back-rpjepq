@@ -123,6 +123,14 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const [[est]] = await c.query("SELECT ppl_estado_proceso e FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_correlativo=900");
   ok(est.e === "CERRADA", "planilla CERRADA");
 
+  console.log("== Repetir la CARGA HISTÓRICA con la nómina ya cerrada");
+  const antes = await deudas(1);
+  await c.query("CALL sp_carga_historica_jubilados(?, 50, 'prueba', @j,@p,@r,@d,@e,@a,@i,@f)", [PERIODO_DEUDA]);
+  const despues = await deudas(1);
+  ok(despues.length === antes.length && despues.every((d, k) => eq(d.pg, antes[k].pg) && eq(d.o, antes[k].o)),
+    "repetir la carga respeta lo que pagó la nómina: cada mes queda igual (enero 2023 con lo abonado por octubre)");
+  ok(despues.some((d) => d.p === periodoActual && d.pla === 900), "el mes de la nómina cerrada se conserva");
+
   await c.end();
   console.log(fallas ? `\n❌ ${fallas} verificaciones fallaron` : "\n✅ Todas las verificaciones pasaron");
   process.exit(fallas ? 1 : 0);
