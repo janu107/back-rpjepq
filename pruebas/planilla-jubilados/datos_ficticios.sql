@@ -36,3 +36,10 @@ INSERT INTO RPJ_MNT_PRESTAMOS_REGIMEN (prr_correlativo, prr_tipo_manejo, prr_id_
 
 INSERT INTO RPJ_CAT_PARAMETRO_PLANILLA (ppl_correlativo, ppl_tipo_planilla, ppl_numero, ppl_fecha_inicio, ppl_fecha_final, ppl_fecha_pago, ppl_frecuencia, ppl_estado, ppl_aplica_porcentaje, ppl_porcentaje_pago, ppl_estado_proceso, ppl_usuario_creacion)
 VALUES (900, 2, CAST(DATE_FORMAT(CURDATE(), '%Y%m') AS UNSIGNED), DATE_FORMAT(CURDATE(), '%Y-%m-01'), LAST_DAY(CURDATE()), LAST_DAY(CURDATE()), 'MENSUAL', 'ACTIVO', 1, 50.00, 'ABIERTA', 'prueba');
+
+-- Planilla REAL del mes anterior hecha a mano con un solo jubilado (Beto): la carga
+-- histórica debe completar a los demás sin tocar el renglón de Beto.
+INSERT INTO RPJ_CAT_PARAMETRO_PLANILLA (ppl_correlativo, ppl_tipo_planilla, ppl_numero, ppl_fecha_inicio, ppl_fecha_final, ppl_fecha_pago, ppl_frecuencia, ppl_estado, ppl_aplica_porcentaje, ppl_porcentaje_pago, ppl_estado_proceso, ppl_usuario_creacion)
+VALUES (899, 2, CAST(DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y%m') AS UNSIGNED), DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01'), LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), LAST_DAY(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'MENSUAL', 'GRABADO', 1, 50.00, 'CERRADA', 'prueba');
+INSERT INTO RPJ_PRC_NOMINA_INGRESO (nin_tipo_manejo, nin_id_tipo_planilla, nin_id_planilla, nin_id_jubilado, nin_tipo_ingreso, nin_valor, nin_valor_teorico, nin_porcentaje_aplicado, nin_pago_corriente, nin_abono_historico, nin_dias_trabajados, nin_puesto, nin_area, nin_usuario_creacion)
+VALUES (2, 2, 899, 3, 1, 2500.00, 5000.00, 50.00, 2500.00, 0.00, 30, 'JUBILADO', 'ADMINISTRATIVA', 'prueba');

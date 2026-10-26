@@ -117,6 +117,7 @@ BEGIN
   DECLARE v_porc       DECIMAL(5,2);
   DECLARE v_dias_mes   INT;
   DECLARE v_abiertas   INT;
+  DECLARE v_es_nueva   INT;
 
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
   BEGIN
@@ -260,6 +261,37 @@ BEGIN
        WHERE m.periodo = v_periodo
          AND ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido > 0;
     ELSE
+      -- Planilla real anterior a la regla nueva: a quien no tiene renglón se le
+      -- agrega como en la historia (porcentaje de su líquido), para que todos queden
+      -- completos hasta el mes anterior. Los renglones existentes no se tocan.
+      SELECT COUNT(*) INTO v_es_nueva FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_planilla = v_id_pla;
+      IF v_es_nueva = 0 THEN
+        INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+        SELECT 2, 2, v_id_pla, m.id_jubilado, 9,
+               ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido,
+               IF(t.periodo_ini = v_periodo, v_dias_mes - DAY(t.fecha_jub) + 1, v_dias_mes), 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+          FROM tmp_hist_mes m JOIN tmp_hist_jub t ON t.id_jubilado = m.id_jubilado
+         WHERE m.periodo = v_periodo
+           AND ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido > 0
+           AND NOT EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i WHERE i.nin_id_planilla = v_id_pla AND i.nin_id_jubilado = m.id_jubilado);
+
+        INSERT INTO RPJ_PRC_NOMINA_INGRESO (
+          nin_tipo_manejo, nin_id_tipo_planilla, nin_id_planilla, nin_id_jubilado, nin_tipo_ingreso,
+          nin_valor, nin_valor_teorico, nin_porcentaje_aplicado, nin_pago_corriente, nin_abono_historico,
+          nin_id_deuda_aplicada, nin_dias_trabajados, nin_puesto, nin_area, nin_usuario_creacion
+        )
+        SELECT 2, 2, v_id_pla, m.id_jubilado, 1,
+               (ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido)
+                 + ROUND(m.liquido * v_porc / 100, 2),
+               t.pension, v_porc, ROUND(m.liquido * v_porc / 100, 2), 0.00, NULL,
+               IF(t.periodo_ini = v_periodo, v_dias_mes - DAY(t.fecha_jub) + 1, v_dias_mes),
+               'JUBILADO', 'ADMINISTRATIVA', p_usuario
+          FROM tmp_hist_mes m JOIN tmp_hist_jub t ON t.id_jubilado = m.id_jubilado
+         WHERE m.periodo = v_periodo
+           AND NOT EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i WHERE i.nin_id_planilla = v_id_pla AND i.nin_id_jubilado = m.id_jubilado);
+        SET p_renglones = p_renglones + ROW_COUNT();
+      END IF;
+
       -- Planilla real: lo que de verdad recibió (ingreso − descuentos).
       UPDATE tmp_hist_mes m
          SET m.pagado = GREATEST(COALESCE((

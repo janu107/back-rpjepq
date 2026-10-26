@@ -58,6 +58,10 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dB = await deudas(3);
   ok(eq(dB.find((d) => d.p === 202312).o, 4985) && eq(dB.find((d) => d.p === 202401).o, 4485), "Beto: el préstamo cuenta solo en los meses vigentes (dic-23 4,985; ene-24 4,485)");
   ok((await deudas(5)).length === 0, "Elsa (sin pensión registrada): no genera deuda");
+  const mesAnt = (await deudas(1)).find((d) => d.p === periodoFin);
+  ok(mesAnt && mesAnt.e === "PARCIAL" && eq(mesAnt.pend, 2992.50), "Juan: el mes anterior (planilla real sin su renglón) se completa al 50%");
+  const [[betoAnt]] = await c.query("SELECT nin_valor v FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=899 AND nin_id_jubilado=3");
+  ok(betoAnt && eq(betoAnt.v, 2500), "Beto: su renglón real del mes anterior no se toca");
 
   const pendJuanAntes = await pendiente(1);
   console.log("== Repetir la carga histórica (debe dar lo mismo)");
