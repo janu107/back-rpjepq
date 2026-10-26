@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
+const sessionCache = require("../utils/sessionCache");
 
 const { splitRoles } = require("./roles.service");
 
@@ -66,7 +67,8 @@ const login = async (usuario, contrasena) => {
     id: user.usu_id,
     usuario: user.usu_usuario,
     rol: rolPrincipal(roles),
-    roles
+    roles,
+    pv: sessionCache.huellaPassword(user.usu_contrasena)
   };
 
   const token = jwt.sign(payload, process.env.JWT_SECRET, {
@@ -99,6 +101,29 @@ const getUserById = async (id) => {
   }
 
   return normalizeUser(user);
+};
+
+// Estado, roles y huella de contraseña actuales del usuario de una sesión (con caché corta).
+// Devuelve null si el usuario ya no existe.
+const getSessionUser = async (id) => {
+  const enCache = sessionCache.obtener(id);
+  if (enCache) return enCache;
+
+  const [rows] = await pool.execute(getSql("auth/sessionUser.sql"), [id]);
+  const row = rows[0];
+  if (!row) return null;
+
+  const roles = splitRoles(row.rol_tipo_rol);
+  const sesion = {
+    id: row.usu_id,
+    usuario: row.usu_usuario,
+    estado: String(row.usu_estado || "").toUpperCase(),
+    rol: rolPrincipal(roles),
+    roles,
+    huella: sessionCache.huellaPassword(row.usu_contrasena)
+  };
+  sessionCache.guardar(id, sesion);
+  return sesion;
 };
 
 const createInitialAdmin = async () => {
@@ -164,5 +189,6 @@ const createInitialAdmin = async () => {
 module.exports = {
   login,
   getUserById,
+  getSessionUser,
   createInitialAdmin
 };

@@ -1,3 +1,4 @@
+const sessionCache = require("../utils/sessionCache");
 const rolesService = require("../services/roles.service");
 const { successResponse } = require("../utils/response");
 
@@ -18,6 +19,7 @@ const updateUserRole = async (req, res, next) => {
   try {
     // Acepta { roles: [...] } (varios) o { rol } (uno, compatibilidad).
     const data = await rolesService.setUserRoles(req.params.id, req.body.roles ?? req.body.rol, req.user?.usuario);
+    sessionCache.invalidar(req.params.id);
     return successResponse(res, data, "Rol actualizado correctamente");
   } catch (error) {
     next(error);

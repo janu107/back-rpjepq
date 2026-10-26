@@ -82,3 +82,9 @@
   abiertos; la contraseña de la BD se pasa por `MYSQL_PWD` y no aparece en `ps`.
 - **Limpieza:** se eliminó la carpeta suelta `front-rpjepq/` dentro del backend y se ignoran
   los `.DS_Store`.
+- **Sesiones al día:** `auth.middleware` confirma contra la base, en cada petición (caché de
+  30 s en `src/utils/sessionCache.js`), que el usuario sigue ACTIVO y usa sus roles ACTUALES.
+  El token lleva una huella de la contraseña (`pv`): si la contraseña cambia, las sesiones
+  anteriores dejan de valer. Desde Usuarios/Roles el cambio aplica al instante.
+  **Al desplegar, todos los usuarios deben iniciar sesión una vez** (los tokens viejos no
+  traen huella).

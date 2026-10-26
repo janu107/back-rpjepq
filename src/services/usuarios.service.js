@@ -4,6 +4,7 @@ const logger = require("../config/logger");
 const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const rolesService = require("./roles.service");
+const sessionCache = require("../utils/sessionCache");
 
 const ESTADOS = ["ACTIVO", "INACTIVO"];
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -162,6 +163,7 @@ const updateUser = async (id, payload, currentUser) => {
     ]);
     await rolesService.upsertUserRole(id, data.rol, updatedBy, connection);
     await connection.commit();
+    sessionCache.invalidar(id);
 
     logger.info("Usuario actualizado", { id, rol: data.rol, updatedBy });
     return getUserById(id);
@@ -178,6 +180,7 @@ const changeStatus = async (id, estado, currentUser) => {
   const normalizedStatus = validateEstado(estado);
   await getUserById(id);
   await pool.execute(getSql("usuarios/cambiarEstadoUsuario.sql"), [normalizedStatus, id]);
+  sessionCache.invalidar(id);
   logger.info("Estado de usuario actualizado", { id, estado: normalizedStatus, updatedBy: currentUser?.usuario });
   return getUserById(id);
 };
@@ -187,6 +190,7 @@ const changePassword = async (id, contrasena, currentUser) => {
   await getUserById(id);
   const hashedPassword = await bcrypt.hash(contrasena, 10);
   await pool.execute(getSql("usuarios/cambiarPasswordUsuario.sql"), [hashedPassword, id]);
+  sessionCache.invalidar(id);
   logger.info("Contrasena de usuario actualizada", { id, updatedBy: currentUser?.usuario });
   return { id };
 };
