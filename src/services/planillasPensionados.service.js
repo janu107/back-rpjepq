@@ -253,6 +253,12 @@ const cerrar = async (id, currentUser) => {
   assertCan("cerrar", planilla.estadoProceso);
   const usuario = currentUser?.usuario || "sistema";
   logger.info("Cerrando planilla pensionados", { idPlanilla: id, usuario });
+  // Jubilados: antes de cerrar se cuadra lo pagado contra la deuda (por si se
+  // editaron montos a mano). Amparistas no manejan deuda.
+  if (Number(planilla.tipoPlanilla) !== TIPO_AMPARISTAS) {
+    const out = await callSp(`sp_cuadrar_planilla_pensionados(?, ?, @p_aju)`, [id, usuario], ["p_aju"]);
+    if (toNum(out.p_aju) > 0) logger.info("Planilla cuadrada antes de cerrar", { idPlanilla: id, ajustados: toNum(out.p_aju) });
+  }
   await callSp(`sp_cerrar_planilla(?, ?)`, [id, usuario], []);
   return getById(id);
 };

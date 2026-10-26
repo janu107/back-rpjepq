@@ -1,0 +1,128 @@
+// Prueba de la regla del 50% sobre el líquido (modelo del Excel "juan perez")
+// en la base LOCAL rpj_pruebas. Nunca toca producción.
+//   MYSQL_BIN=/opt/homebrew/opt/mysql@8.0/bin/mysql node pruebas/planilla-jubilados/regla_50_liquido.test.js
+const path = require("path");
+const B = path.resolve(__dirname, "../..");
+const m = require(B + "/node_modules/mysql2/promise");
+const { execSync } = require("child_process");
+const SEED = path.join(__dirname, "datos_ficticios.sql");
+const MYSQL = process.env.MYSQL_BIN || "mysql";
+const PERIODO_DEUDA = 202301; // Deuda desde enero 2023 (acordado con el área usuaria)
+
+let fallas = 0;
+const ok = (cond, msg) => { console.log(`${cond ? "  ✅" : "  ❌"} ${msg}`); if (!cond) fallas++; };
+const eq = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+const r2 = (n) => Math.round(n * 100) / 100;
+const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde / 100)) * 12 + (hasta % 100) - (desde % 100) + 1;
+
+(async () => {
+  execSync(`${MYSQL} -u root rpj_pruebas < "${SEED}"`);
+  const c = await m.createConnection({ host: "127.0.0.1", user: "root", database: "rpj_pruebas" });
+  const q = async (s, p) => (await c.query(s, p))[0];
+  const hoy = new Date();
+  const periodoActual = hoy.getFullYear() * 100 + hoy.getMonth() + 1;
+  const prev = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  const periodoFin = prev.getFullYear() * 100 + prev.getMonth() + 1;
+
+  const deudas = (jub) => q("SELECT deu_periodo p, deu_monto_original o, deu_monto_pagado pg, deu_monto_pendiente pend, deu_estado e, deu_id_planilla pla FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado=? ORDER BY deu_periodo", [jub]);
+  const pendiente = async (jub) => (await deudas(jub)).reduce((s, d) => s + Number(d.pend), 0);
+  const fila = async (jub) => {
+    const [i] = await q("SELECT * FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=900 AND nin_id_jubilado=?", [jub]);
+    const [d] = await q("SELECT COALESCE(SUM(nde_valor),0) t FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_id_planilla=900 AND nde_id_jubilado=?", [jub]);
+    return i ? { ingreso: Number(i.nin_valor), mes: Number(i.nin_pago_corriente), anterior: Number(i.nin_abono_historico), desc: Number(d.t), neto: r2(i.nin_valor - d.t) } : null;
+  };
+  const prestamos = async () => Object.fromEntries((await q("SELECT prr_correlativo id, prr_saldo s FROM RPJ_MNT_PRESTAMOS_REGIMEN")).map((r) => [r.id, Number(r.s)]));
+
+  // ---------------------------------------------------------------- carga histórica
+  console.log(`== CARGA HISTÓRICA (deuda desde ${PERIODO_DEUDA}, 50%, hasta ${periodoFin})`);
+  await c.query("CALL sp_carga_historica_jubilados(?, 50, 'prueba', @j,@p,@r,@d,@e,@a,@i,@f)", [PERIODO_DEUDA]);
+  console.log("  salida:", (await q("SELECT @j jubilados, @p planillas, @r renglones, @d deudas, @a pendientes, @i inicio, @f fin"))[0]);
+
+  // Juan: 5,985 por mes (8000 − 15 − 2000); cada mes se le pagó 2,992.50.
+  const n = mesesEntre(PERIODO_DEUDA, periodoFin);
+  const dJ = await deudas(1);
+  ok(dJ.length === n && dJ.every((d) => eq(d.o, 5985)), `Juan: ${n} meses adeudados de 5,985 desde ${PERIODO_DEUDA}`);
+  ok(dJ.filter((d) => d.e === "PAGADA").length === Math.floor(n / 2), `Juan: ${Math.floor(n / 2)} meses PAGADOS con lo recibido (del más antiguo)`);
+  ok(dJ[0].p === PERIODO_DEUDA && dJ[0].e === "PAGADA", "Juan: el primer mes adeudado es el primero en saldarse");
+  ok(eq(await pendiente(1), r2(n * 5985 / 2)), `Juan: debe la mitad de todo lo devengado = ${r2(n * 5985 / 2)}`);
+  const [febJuan] = await q("SELECT i.nin_valor v, i.nin_porcentaje_aplicado pct FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo=i.nin_id_planilla WHERE p.ppl_numero=202212 AND i.nin_id_jubilado=1");
+  ok(febJuan && eq(febJuan.pct, 100) && eq(febJuan.v, 8000), "Juan: diciembre 2022 se pagó completo (planilla histórica al 100%)");
+
+  // Ana: entró el 15/06/2025 -> junio proporcional (16 de 30 días) y deuda desde ahí.
+  const dA = await deudas(2);
+  ok(dA[0].p === 202506 && eq(dA[0].o, 3185), "Ana (ingresó 2025): primer mes junio 2025 proporcional = 3,200 − 15 = 3,185");
+  ok(dA.length === mesesEntre(202506, periodoFin), "Ana: deuda solo desde su fecha de ingreso");
+  ok(eq(await pendiente(2), r2(dA.reduce((s, d) => s + Number(d.o), 0) / 2)), "Ana: debe la mitad de lo devengado desde que ingresó");
+
+  // Beto: préstamo BI desde 2024 -> 2023 vale 4,985 y 2024 en adelante 4,485.
+  const dB = await deudas(3);
+  ok(eq(dB.find((d) => d.p === 202312).o, 4985) && eq(dB.find((d) => d.p === 202401).o, 4485), "Beto: el préstamo cuenta solo en los meses vigentes (dic-23 4,985; ene-24 4,485)");
+  ok((await deudas(5)).length === 0, "Elsa (sin pensión registrada): no genera deuda");
+
+  const pendJuanAntes = await pendiente(1);
+  console.log("== Repetir la carga histórica (debe dar lo mismo)");
+  await c.query("CALL sp_carga_historica_jubilados(?, 50, 'prueba', @j,@p,@r,@d,@e,@a,@i,@f)", [PERIODO_DEUDA]);
+  ok(eq(await pendiente(1), pendJuanAntes) && (await deudas(1)).length === n, "segunda carga: mismo resultado");
+
+  // ---------------------------------------------------------------- nómina del mes
+  console.log(`== GENERAR nómina del mes actual (${periodoActual})`);
+  await c.query("CALL sp_generar_nomina_pensionados(900, 1, 'prueba', @a, @b, @c, @d)");
+  const fJ = await fila(1);
+  console.log("  Juan:", fJ);
+  ok(fJ && eq(fJ.desc, 2015) && eq(fJ.neto, 2992.50), "Juan recibe solo 2,992.50 (50% de 5,985)");
+  ok(fJ && eq(fJ.anterior, 2992.50) && eq(fJ.mes, 0), "ese pago se aplica a la deuda más antigua, no al mes actual");
+  const dJ2 = await deudas(1);
+  const mesActual = dJ2.find((d) => d.p === periodoActual);
+  ok(mesActual && eq(mesActual.pend, 5985) && mesActual.pla === 900, "el mes actual queda como deuda de 5,985 (100%)");
+  ok(eq(await pendiente(1), r2(pendJuanAntes + 5985 - 2992.50)), "la deuda de Juan crece medio mes (+2,992.50)");
+
+  const fB = await fila(3);
+  const [bi] = await q("SELECT nde_tipo_descuento t FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_id_planilla=900 AND nde_id_prestamo=2");
+  ok(fB && eq(fB.desc, 515) && bi && bi.t === 11, "Beto: préstamo BI descontado (tipo 'DESCUENTO PRESTAMO BI')");
+  ok((await fila(5)) === null, "Elsa (sin pensión) no entra a la nómina");
+  let pr = await prestamos();
+  ok(eq(pr[1], 28000) && eq(pr[2], 5500) && eq(pr[3], 2700) && eq(pr[4], 6300), "saldos de préstamos rebajados una cuota");
+
+  console.log("== La carga histórica no corre con una planilla GENERADA");
+  let bloqueada = false;
+  try { await c.query("CALL sp_carga_historica_jubilados(?, 50, 'prueba', @j,@p,@r,@d,@e,@a,@i,@f)", [PERIODO_DEUDA]); }
+  catch (e) { bloqueada = /GENERADA/.test(e.sqlMessage || ""); }
+  ok(bloqueada, "carga histórica rechazada mientras la planilla está GENERADA");
+
+  // ---------------------------------------------------------------- reversas
+  console.log("== REVERSAR planilla completa");
+  await c.query("CALL sp_reversar_planilla_pensionados(900, 'prueba', 'test')");
+  ok(eq(await pendiente(1), pendJuanAntes) && !(await deudas(1)).some((d) => d.p === periodoActual), "Juan: deuda vuelve a como estaba y se borra el mes actual");
+  pr = await prestamos();
+  ok(eq(pr[1], 30000) && eq(pr[2], 6000) && eq(pr[3], 3000) && eq(pr[4], 7000), "préstamos restaurados exactos (aun con 2 préstamos)");
+
+  console.log("== VOLVER A GENERAR y reversar SOLO a Carla");
+  await c.query("CALL sp_generar_nomina_pensionados(900, 1, 'prueba', @a, @b, @c, @d)");
+  ok(eq((await fila(1)).neto, 2992.50), "regenerar da el mismo resultado");
+  const pendCarlaGen = await pendiente(4);
+  await c.query("CALL sp_reversar_pago_pensionado(900, 4, 'prueba', 'test')");
+  pr = await prestamos();
+  ok(eq(pr[3], 3000) && eq(pr[4], 7000) && eq(pr[1], 28000), "Carla: sus 2 préstamos restaurados; Juan no se afecta");
+  ok((await fila(4)) === null && (await fila(1)) !== null, "Carla sale de la planilla; Juan sigue");
+  ok(!(await deudas(4)).some((d) => d.p === periodoActual) && eq(await pendiente(4), r2(pendCarlaGen - 5985 + 2992.50)), "Carla: se borra su mes actual y se devuelve su abono");
+
+  console.log("== EDITAR MONTOS a mano (+100 de descuento a Juan) y CERRAR");
+  await c.query("INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion) VALUES (2,2,900,1,9,100,31,'JUBILADO','ADMINISTRATIVA','prueba')");
+  const pendAntesCierre = await pendiente(1);
+  await c.query("CALL sp_cuadrar_planilla_pensionados(900, 'prueba', @aj)");
+  await c.query("CALL sp_cerrar_planilla(900, 'prueba')");
+  const [[aj]] = await c.query("SELECT @aj aj");
+  const fC = await fila(1);
+  const [[apl]] = await c.query("SELECT SUM(apa_monto_aplicado) t FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
+  const mesC = (await deudas(1)).find((d) => d.p === periodoActual);
+  ok(Number(aj.aj) === 1, "el cuadre ajustó solo a Juan");
+  ok(eq(fC.neto, 2892.50) && eq(apl.t, 2892.50), "Juan recibe 2,892.50 y eso mismo queda aplicado a su deuda");
+  ok(mesC && eq(mesC.o, 5885), "el mes actual vale el líquido editado (5,885)");
+  ok(eq(await pendiente(1), r2(pendAntesCierre - 100 + 100)), "la deuda total cuadra (mes vale 100 menos y se pagó 100 menos)");
+  const [[est]] = await c.query("SELECT ppl_estado_proceso e FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_correlativo=900");
+  ok(est.e === "CERRADA", "planilla CERRADA");
+
+  await c.end();
+  console.log(fallas ? `\n❌ ${fallas} verificaciones fallaron` : "\n✅ Todas las verificaciones pasaron");
+  process.exit(fallas ? 1 : 0);
+})().catch((e) => { console.error("ERROR:", e.sqlMessage || e.message); process.exit(1); });
