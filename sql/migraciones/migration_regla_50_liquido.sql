@@ -81,6 +81,7 @@ BEGIN
     SET v_total = v_total + COALESCE((
         SELECT SUM(prr_valor_mes) FROM RPJ_MNT_PRESTAMOS_REGIMEN
          WHERE prr_id_jubilado = p_id_jubilado AND prr_tipo_manejo = 2
+           AND prr_estado <> 'ANULADO'
            AND prr_fecha_inicio <= v_fin AND prr_fecha_fin >= p_mes), 0);
 
     SET v_total = v_total + COALESCE((
@@ -157,6 +158,7 @@ BEGIN
     SELECT 2, 2, p_id_pla, b.id_jubilado, COALESCE(td.tde_id, 9), p.prr_valor_mes, b.dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
       FROM tmp_desc_base b
       JOIN RPJ_MNT_PRESTAMOS_REGIMEN p ON p.prr_id_jubilado = b.id_jubilado AND p.prr_tipo_manejo = 2
+                                      AND p.prr_estado <> 'ANULADO'
                                       AND p.prr_fecha_inicio <= v_fin AND p.prr_fecha_fin >= p_mes
       LEFT JOIN RPJ_CAT_BANCOS bn ON bn.ban_id = p.prr_id_banco
       LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_descripcion = CONCAT('DESCUENTO PRESTAMO ', bn.ban_descripcion)
@@ -611,11 +613,13 @@ BEGIN
               FROM RPJ_MNT_PRESTAMOS_REGIMEN p
               JOIN RPJ_CAT_BANCOS b ON b.ban_id = p.prr_id_banco
               JOIN RPJ_CAT_TIPO_DESCUENTO t ON t.tde_descripcion = CONCAT('DESCUENTO PRESTAMO ', b.ban_descripcion)
-             WHERE p.prr_id_jubilado = v_id_jubilado AND p.prr_tipo_manejo = 2 AND p.prr_estado = 'ACTIVO' AND p.prr_saldo > 0;
+             WHERE p.prr_id_jubilado = v_id_jubilado AND p.prr_tipo_manejo = 2 AND p.prr_estado = 'ACTIVO' AND p.prr_saldo > 0
+               AND p.prr_fecha_inicio <= v_fecha_final;
             UPDATE RPJ_MNT_PRESTAMOS_REGIMEN
                SET prr_saldo = GREATEST(prr_saldo - prr_valor_mes, 0),
                    prr_estado = CASE WHEN prr_saldo - prr_valor_mes <= 0 THEN 'OPERADA' ELSE 'ACTIVO' END
-             WHERE prr_id_jubilado = v_id_jubilado AND prr_tipo_manejo = 2 AND prr_estado = 'ACTIVO' AND prr_saldo > 0;
+             WHERE prr_id_jubilado = v_id_jubilado AND prr_tipo_manejo = 2 AND prr_estado = 'ACTIVO' AND prr_saldo > 0
+               AND prr_fecha_inicio <= v_fecha_final;
 
             IF v_aplica_asociacion = TRUE AND v_monto_asociacion > 0 THEN
                 INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)

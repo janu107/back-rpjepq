@@ -62,6 +62,13 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dB = await deudas(3);
   ok(eq(dB.find((d) => d.p === 202312).o, 4985) && eq(dB.find((d) => d.p === 202401).o, 4485), "Beto: el préstamo cuenta solo en los meses vigentes (dic-23 4,985; ene-24 4,485)");
   ok((await deudas(5)).length === 0, "Elsa (sin pensión registrada): no genera deuda");
+  const dF = await deudas(6);
+  ok(eq(dF.find((d) => d.p === 202303).o, 4685) && eq(dF.find((d) => d.p === 202406).o, 4685),
+    "Fabio: 2023 a jun-2024 resta el préstamo viejo ya terminado (INACTIVO): 5000 − 15 − 300 = 4,685");
+  ok(eq(dF.find((d) => d.p === 202407).o, 4285) && eq(dF.find((d) => d.p === 202508).o, 4285),
+    "Fabio: desde jul-2024 resta el préstamo renovado en otro banco: 5000 − 15 − 700 = 4,285");
+  const [[descF]] = await c.query("SELECT GROUP_CONCAT(d.nde_tipo_descuento ORDER BY d.nde_tipo_descuento) t FROM RPJ_PRC_NOMINA_DESCUENTO d JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo=d.nde_id_planilla WHERE p.ppl_numero=202303 AND d.nde_id_jubilado=6");
+  ok(descF.t === "5,8", "Fabio: en la historia el descuento sale como PRÉSTAMO BANRURAL + ASOCIACIÓN (el ANULADO no cuenta)");
   const [[renJuan]] = await c.query("SELECT COUNT(*) n FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=899 AND nin_id_jubilado=1");
   ok(renJuan.n === 1, "Juan: el mes anterior (planilla real sin su renglón) se completa con su pago del 50%");
   const [[betoAnt]] = await c.query("SELECT nin_valor v FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=899 AND nin_id_jubilado=3");
@@ -84,6 +91,8 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const [bi] = await q("SELECT nde_tipo_descuento t FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_id_planilla=900 AND nde_id_prestamo=2");
   ok(fB && eq(fB.desc, 515) && bi && bi.t === 11, "Beto: préstamo BI descontado (tipo 'DESCUENTO PRESTAMO BI')");
   ok((await fila(5)) === null, "Elsa (sin pensión) no entra a la nómina");
+  const fF = await fila(6);
+  ok(fF && eq(fF.desc, 715), "Fabio: la nómina solo cobra el préstamo vigente (700 + 15); no el anulado ni el que empieza en el futuro");
   let pr = await prestamos();
   ok(eq(pr[1], 28000) && eq(pr[2], 5500) && eq(pr[3], 2700) && eq(pr[4], 6300), "saldos de préstamos rebajados una cuota");
 

@@ -488,7 +488,24 @@ const generarDeudaHistoricaMasivo = async (periodoDeuda, porcentaje, currentUser
                            AND s.sal_tipo_ingreso = 1 AND s.sal_salario > 0)`
   );
 
+  // Préstamos del mismo jubilado cuyas vigencias se cruzan (p. ej. una renovación
+  // registrada sin terminar el anterior): esos meses restan las dos cuotas. No se
+  // bloquea (puede ser real tener dos préstamos), solo se avisa para revisar.
+  const [traslapes] = await pool.query(
+    `SELECT DISTINCT j.jub_id AS codigo, CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS nombre,
+            a.prr_no_referencia AS refA, b.prr_no_referencia AS refB,
+            GREATEST(a.prr_fecha_inicio, b.prr_fecha_inicio) AS desde, LEAST(a.prr_fecha_fin, b.prr_fecha_fin) AS hasta
+       FROM RPJ_MNT_PRESTAMOS_REGIMEN a
+       JOIN RPJ_MNT_PRESTAMOS_REGIMEN b ON b.prr_id_jubilado = a.prr_id_jubilado AND b.prr_correlativo > a.prr_correlativo
+       JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = a.prr_id_jubilado
+      WHERE a.prr_tipo_manejo = 2 AND b.prr_tipo_manejo = 2
+        AND a.prr_estado <> 'ANULADO' AND b.prr_estado <> 'ANULADO'
+        AND a.prr_fecha_inicio <= b.prr_fecha_fin AND b.prr_fecha_inicio <= a.prr_fecha_fin
+      ORDER BY nombre LIMIT 50`
+  );
+
   return {
+    prestamosTraslapados: traslapes.map((t) => ({ ...t, desde: t.desde, hasta: t.hasta })),
     jubiladosProcesados: toNum(out.p_jub),
     planillasCreadas: toNum(out.p_pla),
     renglones: toNum(out.p_ren),

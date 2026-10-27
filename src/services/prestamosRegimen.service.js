@@ -3,7 +3,10 @@ const { pool } = require("../config/db");
 const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
-const ESTADOS = ["ACTIVO", "INACTIVO", "CANCELADO"];
+// ACTIVO: se descuenta en nómina · INACTIVO / CANCELADO: terminado (cuenta en la
+// deuda histórica de sus meses) · OPERADA: terminado por el sistema al llegar a
+// saldo 0 · ANULADO: creado por error, no cuenta en ningún cálculo.
+const ESTADOS = ["ACTIVO", "INACTIVO", "CANCELADO", "OPERADA", "ANULADO"];
 
 const createError = (message, status = 400) => { const error = new Error(message); error.status = status; return error; };
 
@@ -66,7 +69,7 @@ const validate = (data) => {
   ["tipoManejo", "idEmpleado", "idBanco", "noReferencia", "monto", "valorMes", "noCuotas", "fechaInicio", "fechaFin", "estado"].forEach((field) => {
     if (data[field] === undefined || data[field] === null || String(data[field]).trim() === "") throw createError(`El campo ${field} es obligatorio`);
   });
-  if (!ESTADOS.includes(String(data.estado).toUpperCase())) throw createError("Estado no permitido. Use: ACTIVO, INACTIVO, CANCELADO");
+  if (!ESTADOS.includes(String(data.estado).toUpperCase())) throw createError("Estado no permitido. Use: ACTIVO, INACTIVO, CANCELADO, OPERADA o ANULADO");
 };
 
 const normalize = (data) => upperCaseFields(data, ["noReferencia", "estado", "uso"]);
