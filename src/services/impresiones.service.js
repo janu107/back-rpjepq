@@ -636,6 +636,9 @@ const periodoAplicado = (f) => {
   return `${texto} ${Number(f.pct_periodo || 0)}%`;
 };
 
+// Tamaño de letra de la tabla de la nómina de jubilados (puntos).
+const LETRA_JUB = 7.5;
+
 const COLS_JUBILADOS = (doc) => {
   const anchos = pdf.repartirAnchos(doc, [5, 24, 11, 8, 10, 8, 8, 8, 8, 8, 8, 11, 10]);
   const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
@@ -712,16 +715,16 @@ const pdfNominaJubilados = async (idPlanilla, opciones = {}, user) => {
   grupos.forEach(([tipo, filasTipo], idx) => {
     if (idx > 0) doc.moveDown(0.8);
     if (porTipo) {
-      doc.font("Helvetica-Bold").fontSize(8).text(`PENSION: ${tipo}`);
+      doc.font("Helvetica-Bold").fontSize(9).text(`PENSION: ${tipo}`);
       doc.moveDown(0.15);
     }
-    pdf.dibujarTabla(doc, columnas, filasTipo, { fuente: 6.2, alturaFila: 11, reservaInferior: 70, alRepetirEncabezado: cabecera });
-    pdf.filaTotales(doc, columnas, totalesJubilados(filasTipo), porTipo ? `TOTAL ${tipo}` : "TOTAL DE PENSIONES", 2);
+    pdf.dibujarTabla(doc, columnas, filasTipo, { fuente: LETRA_JUB, alturaFila: 13, altoEncabezado: 22, reservaInferior: 70, alRepetirEncabezado: cabecera });
+    pdf.filaTotales(doc, columnas, totalesJubilados(filasTipo), porTipo ? `TOTAL ${tipo}` : "TOTAL DE PENSIONES", 2, { fuente: LETRA_JUB });
   });
 
   if (porTipo && grupos.length > 1) {
     doc.moveDown(0.4);
-    pdf.filaTotales(doc, columnas, totalesJubilados(filas), "TOTAL DE PENSIONES", 2);
+    pdf.filaTotales(doc, columnas, totalesJubilados(filas), "TOTAL DE PENSIONES", 2, { fuente: LETRA_JUB });
   }
 
   cierreNomina(doc, { total: sumar(filas, "liquido"), fechaPago: planilla.fechaPago, firmas });

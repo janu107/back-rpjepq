@@ -132,25 +132,28 @@ const dibujarTabla = (doc, columnas, filas, opciones = {}) => {
 // valores: objeto { <campo>: "texto ya formateado" }
 // La etiqueta se dibuja abarcando las primeras `columnasEtiqueta` columnas, porque
 // la primera suele ser muy angosta (el "No.") y el texto quedaría partido.
-const filaTotales = (doc, columnas, valores, etiqueta = "TOTALES", columnasEtiqueta = 3) => {
+const filaTotales = (doc, columnas, valores, etiqueta = "TOTALES", columnasEtiqueta = 3, opciones = {}) => {
+  const { fuente = 6.8 } = opciones;
+  const alto = Math.max(14, Math.round(fuente * 2));
   const x0 = doc.page.margins.left;
   const anchoTabla = columnas.reduce((s, c) => s + c.ancho, 0);
-  if (doc.y + 14 > doc.page.height - doc.page.margins.bottom) doc.addPage();
+  if (doc.y + alto > doc.page.height - doc.page.margins.bottom) doc.addPage();
   const y = doc.y;
-  doc.save().rect(x0, y, anchoTabla, 14).fill("#DDE3EA").restore();
+  doc.save().rect(x0, y, anchoTabla, alto).fill("#DDE3EA").restore();
   const abarcadas = Math.min(columnasEtiqueta, columnas.length);
   const anchoEtiqueta = columnas.slice(0, abarcadas).reduce((s, c) => s + c.ancho, 0);
 
-  doc.font("Helvetica-Bold").fontSize(6.8).fillColor("#000000");
-  doc.text(String(etiqueta), x0 + 2, y + 4, { width: anchoEtiqueta - 4, align: "left", lineBreak: false, ellipsis: true });
+  doc.font("Helvetica-Bold").fontSize(fuente).fillColor("#000000");
+  const yTexto = y + 4 + (alto - 14) / 2;
+  doc.text(String(etiqueta), x0 + 2, yTexto, { width: anchoEtiqueta - 4, align: "left", lineBreak: false, ellipsis: true });
 
   let x = x0 + anchoEtiqueta;
   columnas.slice(abarcadas).forEach((c) => {
-    doc.text(String(valores[c.campo] ?? ""), x + 2, y + 4,
+    doc.text(String(valores[c.campo] ?? ""), x + 2, yTexto,
       { width: c.ancho - 4, align: c.align || "right", lineBreak: false });
     x += c.ancho;
   });
-  doc.y = y + 14;
+  doc.y = y + alto;
   doc.x = x0;
   return doc.y;
 };
