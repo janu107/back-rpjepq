@@ -130,4 +130,130 @@ const amparistas = async () => {
   return rows;
 };
 
-module.exports = { dashboardResumen, saldos, pagos, beneficiariosActivos, convenios, deudaPorTipo, amparistas };
+// ---------------------------------------------------------------------------
+// PDF formal de cada reporte (mismo estilo que las impresiones del sistema):
+// encabezado institucional, título, filtros aplicados, tabla, totales y pie.
+// ---------------------------------------------------------------------------
+const REPORTES_PDF = {
+  saldos: {
+    titulo: "Reporte de saldos de jubilados",
+    datos: (f) => saldos(f.q),
+    columnas: [
+      { titulo: "CÓDIGO", campo: "codigo", peso: 6, align: "right" },
+      { titulo: "JUBILADO", campo: "nombre", peso: 30 },
+      { titulo: "DPI", campo: "dpi", peso: 14 },
+      { titulo: "TIPO", campo: "tipoPago", peso: 10 },
+      { titulo: "ESTADO", campo: "estadoPago", peso: 10 },
+      { titulo: "MESES ADEUDADOS", campo: "mesesAdeudados", peso: 9, align: "right", total: "suma0" },
+      { titulo: "SALDO", campo: "saldo", peso: 12, align: "right", monto: true, total: "suma" }
+    ]
+  },
+  pagos: {
+    titulo: "Reporte de pagos a jubilados",
+    datos: (f) => pagos(f.desde, f.hasta, f.idJubilado, f.q),
+    horizontal: true,
+    columnas: [
+      { titulo: "PERÍODO", campo: "periodo", peso: 7 },
+      { titulo: "FECHA PAGO", campo: "fechaPago", peso: 9, fecha: true, align: "center" },
+      { titulo: "CÓDIGO", campo: "codigo", peso: 6, align: "right" },
+      { titulo: "BENEFICIARIO / JUBILADO", campo: "beneficiario", peso: 30 },
+      { titulo: "% PAGADO", campo: "porcentaje", peso: 7, align: "right", pct: true },
+      { titulo: "PAGO DEL MES", campo: "pagoCorriente", peso: 11, align: "right", monto: true, total: "suma" },
+      { titulo: "ABONO A DEUDA", campo: "abono", peso: 11, align: "right", monto: true, total: "suma" },
+      { titulo: "TOTAL", campo: "total", peso: 11, align: "right", monto: true, total: "suma" }
+    ]
+  },
+  "beneficiarios-activos": {
+    titulo: "Reporte de beneficiarios activos",
+    datos: () => beneficiariosActivos(),
+    columnas: [
+      { titulo: "BENEFICIARIO", campo: "nombre", peso: 28 },
+      { titulo: "DPI", campo: "dpi", peso: 14 },
+      { titulo: "PARENTESCO", campo: "parentesco", peso: 12 },
+      { titulo: "%", campo: "porcentaje", peso: 7, align: "right", pct: true },
+      { titulo: "JUBILADO", campo: "jubilado", peso: 28 }
+    ]
+  },
+  convenios: {
+    titulo: "Reporte de convenios de pago",
+    datos: () => convenios(),
+    columnas: [
+      { titulo: "TITULAR", campo: "titular", peso: 30 },
+      { titulo: "TIPO", campo: "tipo", peso: 12 },
+      { titulo: "ESTADO", campo: "estado", peso: 10 },
+      { titulo: "DEUDA", campo: "deudaTotal", peso: 13, align: "right", monto: true, total: "suma" },
+      { titulo: "CUOTA", campo: "montoCuota", peso: 12, align: "right", monto: true },
+      { titulo: "CUOTAS", campo: "cuotas", peso: 7, align: "right" }
+    ]
+  },
+  "deuda-por-tipo": {
+    titulo: "Reporte de deuda por tipo de pago",
+    datos: () => deudaPorTipo(),
+    columnas: [
+      { titulo: "TIPO DE PAGO", campo: "tipoPago", peso: 30 },
+      { titulo: "PERÍODOS", campo: "periodosDeuda", peso: 15, align: "right", total: "suma0" },
+      { titulo: "SALDO", campo: "saldo", peso: 20, align: "right", monto: true, total: "suma" }
+    ]
+  },
+  amparistas: {
+    titulo: "Reporte de amparistas",
+    datos: () => amparistas(),
+    columnas: [
+      { titulo: "JUBILADO", campo: "nombre", peso: 28 },
+      { titulo: "DPI", campo: "dpi", peso: 14 },
+      { titulo: "ESTADO", campo: "estadoPago", peso: 10 },
+      { titulo: "EXPEDIENTE", campo: "noExpediente", peso: 13 },
+      { titulo: "JUZGADO", campo: "juzgado", peso: 22 },
+      { titulo: "F. EFECTIVA", campo: "fechaEfectiva", peso: 10, fecha: true, align: "center" }
+    ]
+  }
+};
+
+const pdfReporte = async (nombre, filtros = {}, usuario) => {
+  const def = REPORTES_PDF[nombre];
+  if (!def) { const e = new Error("Reporte no encontrado"); e.status = 404; throw e; }
+  const L = require("../utils/pdfLayout");
+  const filas = await def.datos(filtros);
+
+  const doc = L.nuevoDoc(def.horizontal ? { size: "LETTER", layout: "landscape", margin: 30 } : L.CARTA);
+  const anchos = L.repartirAnchos(doc, def.columnas.map((c) => c.peso));
+  const valor = (c, f) => {
+    const v = f[c.campo];
+    if (c.monto) return L.q(v);
+    if (c.pct) return `${Number(v || 0)}%`;
+    if (c.fecha) return v ? L.fecha(v) : "";
+    return v ?? "";
+  };
+  const columnas = def.columnas.map((c, i) => ({ titulo: c.titulo, campo: c.campo, align: c.align || "left", ancho: anchos[i], valor: (f) => valor(c, f) }));
+
+  const aplicados = [
+    filtros.q ? `Búsqueda: "${String(filtros.q).trim()}"` : null,
+    filtros.desde || filtros.hasta ? `Fecha de pago: ${filtros.desde ? L.fecha(filtros.desde) : "inicio"} al ${filtros.hasta ? L.fecha(filtros.hasta) : "hoy"}` : null
+  ].filter(Boolean);
+  const cabecera = (d) => L.encabezado(d, {
+    titulo: def.titulo,
+    subtitulo: `Generado el ${L.fechaLarga()}  ·  ${filas.length} registro(s)`,
+    lineas: aplicados.length ? [`Filtros: ${aplicados.join("   ·   ")}`] : []
+  });
+  cabecera(doc);
+
+  if (!filas.length) {
+    doc.font("Helvetica").fontSize(9).text("No hay registros con los filtros aplicados.", { align: "center" });
+  } else {
+    L.dibujarTabla(doc, columnas, filas, { fuente: 7, alturaFila: 12, altoEncabezado: 18, reservaInferior: 20, alRepetirEncabezado: cabecera });
+    const conTotal = def.columnas.filter((c) => c.total);
+    if (conTotal.length) {
+      const totales = {};
+      conTotal.forEach((c) => {
+        const suma = filas.reduce((s, f) => s + Number(f[c.campo] || 0), 0);
+        totales[c.campo] = c.total === "suma0" ? String(suma) : L.q(suma);
+      });
+      const primeraConTotal = def.columnas.findIndex((c) => c.total);
+      L.filaTotales(doc, columnas, totales, "TOTALES", Math.max(1, primeraConTotal));
+    }
+  }
+  L.pieDePagina(doc, usuario);
+  return { buffer: await L.aBuffer(doc), filename: `${nombre}.pdf` };
+};
+
+module.exports = { dashboardResumen, saldos, pagos, beneficiariosActivos, convenios, deudaPorTipo, amparistas, pdfReporte, REPORTES_PDF };

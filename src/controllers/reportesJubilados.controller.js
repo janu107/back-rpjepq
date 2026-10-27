@@ -9,4 +9,13 @@ const convenios = async (req, res, next) => { try { return successResponse(res, 
 const deudaPorTipo = async (req, res, next) => { try { return successResponse(res, await service.deudaPorTipo(), "Deuda por tipo"); } catch (e) { next(e); } };
 const amparistas = async (req, res, next) => { try { return successResponse(res, await service.amparistas(), "Reporte de amparistas"); } catch (e) { next(e); } };
 
-module.exports = { dashboard, saldos, pagos, beneficiariosActivos, convenios, deudaPorTipo, amparistas };
+const pdf = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.pdfReporte(req.params.reporte, req.query, req.user?.usuario);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (e) { next(e); }
+};
+
+module.exports = { dashboard, saldos, pagos, beneficiariosActivos, convenios, deudaPorTipo, amparistas, pdf };

@@ -17,5 +17,7 @@ router.get("/beneficiarios-activos", LECTURA, controller.beneficiariosActivos);
 router.get("/convenios", LECTURA, controller.convenios);
 router.get("/deuda-por-tipo", LECTURA, controller.deudaPorTipo);
 router.get("/amparistas", LECTURA, controller.amparistas);
+// PDF formal de cualquiera de los reportes anteriores (mismos filtros: q, desde, hasta).
+router.get("/:reporte/pdf", LECTURA, controller.pdf);
 
 module.exports = router;
