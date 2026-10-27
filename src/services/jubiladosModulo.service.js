@@ -203,7 +203,7 @@ const historiaCompleta = async (id) => {
             MAX(x.deuda_pagada) AS deudaPagada, MAX(x.deuda_pendiente) AS deudaPendiente,
             MAX(x.deuda_estado) AS deudaEstado, MAX(x.deuda_planilla) AS deudaPlanilla,
             SUM(x.descuentos) AS descuentos, MAX(x.detalle_desc) AS detalleDescuentos,
-            MAX(x.en_proceso) AS enProceso
+            MAX(x.en_proceso) AS enProceso, MAX(x.pagado_con) AS pagadoCon
        FROM (
          SELECT p.ppl_numero AS periodo, i.nin_valor_teorico AS pension, i.nin_porcentaje_aplicado AS porcentaje,
                 i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
@@ -215,7 +215,8 @@ const historiaCompleta = async (id) => {
                 (SELECT GROUP_CONCAT(CONCAT(COALESCE(td.tde_descripcion, 'DESCUENTO'), ': ', FORMAT(dd.nde_valor, 2)) SEPARATOR ' | ')
                    FROM RPJ_PRC_NOMINA_DESCUENTO dd LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_id = dd.nde_tipo_descuento
                   WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado) AS detalle_desc,
-                IF(p.ppl_estado_proceso = 'GENERADA', 1, 0) AS en_proceso
+                IF(p.ppl_estado_proceso = 'GENERADA', 1, 0) AS en_proceso,
+                NULL AS pagado_con
            FROM RPJ_PRC_NOMINA_INGRESO i
            INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
           WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
@@ -223,7 +224,11 @@ const historiaCompleta = async (id) => {
          UNION ALL
          SELECT d.deu_periodo, NULL, NULL, 0, NULL,
                 d.deu_correlativo, d.deu_monto_original, d.deu_monto_pagado, d.deu_monto_pendiente, d.deu_estado, d.deu_id_planilla,
-                0, NULL, 0
+                0, NULL, 0,
+                -- Planillas (nóminas cerradas) que abonaron a la deuda de este mes.
+                (SELECT GROUP_CONCAT(DISTINCT pa.ppl_numero ORDER BY pa.ppl_numero SEPARATOR ',')
+                   FROM RPJ_PRC_APLICACION_PAGO a JOIN RPJ_CAT_PARAMETRO_PLANILLA pa ON pa.ppl_correlativo = a.apa_id_planilla
+                  WHERE a.apa_id_deuda = d.deu_correlativo) AS pagado_con
            FROM RPJ_PRC_DEUDA_JUBILADO d
           WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL
        ) x
@@ -262,7 +267,10 @@ const historiaCompleta = async (id) => {
       // recibido ese mes (su 50%) es su pago normal y no cuenta como abono.
       montoPagado: deuda > 0
         ? Math.round(Math.max(toNum(r.deudaPagada) - (r.deudaPlanilla ? 0 : Math.min(toNum(r.pagadoMes), deuda)), 0) * 100) / 100
-        : toNum(r.pagadoMes),
+        : 0,
+      // Meses pagados completos (antes del 50%) no tienen deuda: sin abono.
+      sinDeuda: !(deuda > 0),
+      pagadoCon: r.pagadoCon ? String(r.pagadoCon).split(",") : [],
       recibidoMes: toNum(r.pagadoMes),
       saldo: toNum(r.deudaPendiente),
       // Estado visible según lo abonado a la DEUDA (no el pago normal del 50%).
