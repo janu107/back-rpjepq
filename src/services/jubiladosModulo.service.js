@@ -201,7 +201,7 @@ const historiaCompleta = async (id) => {
             SUM(x.pagado_mes) AS pagadoMes, MAX(x.fecha_pago) AS fechaPago,
             MAX(x.deuda_id) AS id, MAX(x.deuda_original) AS deudaOriginal,
             MAX(x.deuda_pagada) AS deudaPagada, MAX(x.deuda_pendiente) AS deudaPendiente,
-            MAX(x.deuda_estado) AS deudaEstado,
+            MAX(x.deuda_estado) AS deudaEstado, MAX(x.deuda_planilla) AS deudaPlanilla,
             SUM(x.descuentos) AS descuentos, MAX(x.detalle_desc) AS detalleDescuentos,
             MAX(x.en_proceso) AS enProceso
        FROM (
@@ -209,7 +209,7 @@ const historiaCompleta = async (id) => {
                 i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
                                          WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado), 0) AS pagado_mes,
                 p.ppl_fecha_pago AS fecha_pago,
-                NULL AS deuda_id, NULL AS deuda_original, NULL AS deuda_pagada, NULL AS deuda_pendiente, NULL AS deuda_estado,
+                NULL AS deuda_id, NULL AS deuda_original, NULL AS deuda_pagada, NULL AS deuda_pendiente, NULL AS deuda_estado, NULL AS deuda_planilla,
                 COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
                            WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado), 0) AS descuentos,
                 (SELECT GROUP_CONCAT(CONCAT(COALESCE(td.tde_descripcion, 'DESCUENTO'), ': ', FORMAT(dd.nde_valor, 2)) SEPARATOR ' | ')
@@ -222,7 +222,7 @@ const historiaCompleta = async (id) => {
             AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'
          UNION ALL
          SELECT d.deu_periodo, NULL, NULL, 0, NULL,
-                d.deu_correlativo, d.deu_monto_original, d.deu_monto_pagado, d.deu_monto_pendiente, d.deu_estado,
+                d.deu_correlativo, d.deu_monto_original, d.deu_monto_pagado, d.deu_monto_pendiente, d.deu_estado, d.deu_id_planilla,
                 0, NULL, 0
            FROM RPJ_PRC_DEUDA_JUBILADO d
           WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL
@@ -258,10 +258,17 @@ const historiaCompleta = async (id) => {
         : pct === null ? "SIN PAGO" : pct >= 100 ? "COMPLETO" : `${pct}%`,
       pensionCompleta: toNum(r.pensionCompleta),
       montoGenerado: deuda > 0 ? deuda : toNum(r.pagadoMes),
-      montoPagado: deuda > 0 ? toNum(r.deudaPagada) : toNum(r.pagadoMes),
+      // Abonado = lo pagado a la DEUDA de ese mes. En meses de la carga histórica lo
+      // recibido ese mes (su 50%) es su pago normal y no cuenta como abono.
+      montoPagado: deuda > 0
+        ? Math.round(Math.max(toNum(r.deudaPagada) - (r.deudaPlanilla ? 0 : Math.min(toNum(r.pagadoMes), deuda)), 0) * 100) / 100
+        : toNum(r.pagadoMes),
       recibidoMes: toNum(r.pagadoMes),
       saldo: toNum(r.deudaPendiente),
-      estado: r.deudaEstado || "PAGADO",
+      // Estado visible según lo abonado a la DEUDA (no el pago normal del 50%).
+      estado: !r.deudaEstado ? "PAGADO"
+        : toNum(r.deudaPendiente) <= 0 ? "PAGADA"
+        : (Math.max(toNum(r.deudaPagada) - (r.deudaPlanilla ? 0 : Math.min(toNum(r.pagadoMes), deuda)), 0) > 0 ? "PARCIAL" : "PENDIENTE"),
       fechaGeneracion: r.fechaPago
     };
   });
@@ -340,7 +347,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
       .text(val, cx + 6, y + 21, { width: w - 12, align: "center", lineBreak: false });
   };
   tarjeta(0, "Total devengado (meses con deuda)", Q(totalDevengado));
-  tarjeta(1, "Total abonado", Q(totalAbonado));
+  tarjeta(1, "Abonado a la deuda", Q(totalAbonado));
   tarjeta(2, "Meses con saldo pendiente", `${pendientes.length} de ${deuda.length}`);
   tarjeta(3, "SALDO PENDIENTE", Q(saldo), true);
   y += 50;
@@ -368,7 +375,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
     { titulo: "Descuentos", campo: "descuentos", align: "right" },
     { titulo: "Líquido del mes", campo: "liquido", align: "right" },
     { titulo: "Recibido en la planilla", campo: "recibido", align: "right" },
-    { titulo: "Abonado al mes", campo: "abonado", align: "right" },
+    { titulo: "Abonado a la deuda", campo: "abonado", align: "right" },
     { titulo: "Saldo", campo: "saldo", align: "right" },
     { titulo: "Estado", campo: "estado", align: "center" }
   ].map((c, i) => ({ ...c, ancho: anchos[i] }));

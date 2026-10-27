@@ -43,11 +43,8 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dJ = await deudas(1);
   ok(dJ.length === n && dJ.every((d) => eq(d.o, 5985)), `Juan: ${n} meses adeudados de 5,985 desde ${PERIODO_DEUDA}`);
   ok(dJ[0].p === PERIODO_DEUDA, "Juan: la deuda empieza en el período indicado");
-  ok(dJ.filter((d) => d.e === "PAGADA").length === Math.floor(n / 2) && dJ[0].e === "PAGADA",
-    `Juan: lo pagado completa los ${Math.floor(n / 2)} meses más antiguos`);
-  ok(dJ.filter((d) => d.e === "PARCIAL").length <= 1, "Juan: a lo sumo un mes queda parcial (el que está en turno)");
-  ok(dJ.filter((d) => d.e === "PENDIENTE").every((d) => eq(d.pg, 0) && eq(d.pend, 5985)),
-    "Juan: los meses que aún no les toca quedan con la pensión completa pendiente y abonado 0");
+  ok(dJ.every((d) => d.e === "PARCIAL" && eq(d.pend, 2992.50)),
+    "Juan: desde enero 2023 cada mes se pagó la mitad y la otra mitad (2,992.50) queda como deuda");
   ok(eq(await pendiente(1), r2(n * 5985 / 2)), `Juan: debe la mitad de todo lo devengado = ${r2(n * 5985 / 2)}`);
   const [febJuan] = await q("SELECT i.nin_valor v, i.nin_porcentaje_aplicado pct FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo=i.nin_id_planilla WHERE p.ppl_numero=202212 AND i.nin_id_jubilado=1");
   ok(febJuan && eq(febJuan.pct, 100) && eq(febJuan.v, 8000), "Juan: diciembre 2022 se pagó completo (planilla histórica al 100%)");
