@@ -236,7 +236,55 @@ const historiaCompleta = async (id) => {
       ORDER BY x.periodo`,
     [id, id]
   );
+  const desglose = await desglosePorPeriodo(id);
   return rows.map((r) => {
+    const fila = historiaMes(r);
+    // Descuentos por grupo (mismos grupos de la nómina impresa). Si el mes no tiene
+    // el detalle guardado, la diferencia va a "otros" para que el desglose cuadre.
+    const grupos = { ...GRUPOS_VACIOS, ...(desglose[r.periodo] || {}) };
+    const sumaGrupos = Object.values(grupos).reduce((a, b) => a + b, 0);
+    const resto = Math.round((fila.descuentos - sumaGrupos) * 100) / 100;
+    if (resto > 0) grupos.otros = Math.round((grupos.otros + resto) * 100) / 100;
+    return { ...fila, desglose: grupos };
+  });
+};
+
+// Grupos de descuento (iguales a las columnas de la nómina de jubilados).
+const GRUPOS_VACIOS = { asociacion: 0, prestamos: 0, judicial: 0, banrural: 0, bantrab: 0, otros: 0 };
+const grupoDescuento = (tipo) => {
+  switch (Number(tipo)) {
+    case 8: return "asociacion";
+    case 7: case 9: case 11: return "prestamos";
+    case 4: return "judicial";
+    case 5: return "banrural";
+    case 6: return "bantrab";
+    default: return "otros";
+  }
+};
+
+const desglosePorPeriodo = async (id) => {
+  const [rows] = await pool.execute(
+    `SELECT p.ppl_numero AS periodo, dd.nde_tipo_descuento AS tipo, SUM(dd.nde_valor) AS valor
+       FROM RPJ_PRC_NOMINA_DESCUENTO dd
+       INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = dd.nde_id_planilla
+      WHERE dd.nde_id_jubilado = ? AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'
+        AND EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i
+                     WHERE i.nin_id_planilla = dd.nde_id_planilla AND i.nin_id_jubilado = dd.nde_id_jubilado
+                       AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2)
+      GROUP BY p.ppl_numero, dd.nde_tipo_descuento`,
+    [id]
+  );
+  const out = {};
+  rows.forEach((r) => {
+    const g = grupoDescuento(r.tipo);
+    out[r.periodo] = out[r.periodo] || {};
+    out[r.periodo][g] = Math.round(((out[r.periodo][g] || 0) + toNum(r.valor)) * 100) / 100;
+  });
+  return out;
+};
+
+// Arma la fila de un mes de la historia (ver historiaCompleta).
+const historiaMes = (r) => {
     const deuda = toNum(r.deudaOriginal);
     const pct = r.porcentaje === null ? null : toNum(r.porcentaje);
     const descuentos = toNum(r.descuentos);
@@ -276,7 +324,6 @@ const historiaCompleta = async (id) => {
         : (toNum(r.deudaPagada) > 0 ? "PARCIAL" : "PENDIENTE"),
       fechaGeneracion: r.fechaPago
     };
-  });
 };
 
 const registrarFallecimiento = async (id, body, currentUser) => {
