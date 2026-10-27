@@ -201,20 +201,29 @@ const historiaCompleta = async (id) => {
             SUM(x.pagado_mes) AS pagadoMes, MAX(x.fecha_pago) AS fechaPago,
             MAX(x.deuda_id) AS id, MAX(x.deuda_original) AS deudaOriginal,
             MAX(x.deuda_pagada) AS deudaPagada, MAX(x.deuda_pendiente) AS deudaPendiente,
-            MAX(x.deuda_estado) AS deudaEstado
+            MAX(x.deuda_estado) AS deudaEstado,
+            SUM(x.descuentos) AS descuentos, MAX(x.detalle_desc) AS detalleDescuentos,
+            MAX(x.en_proceso) AS enProceso
        FROM (
          SELECT p.ppl_numero AS periodo, i.nin_valor_teorico AS pension, i.nin_porcentaje_aplicado AS porcentaje,
                 i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
                                          WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado), 0) AS pagado_mes,
                 p.ppl_fecha_pago AS fecha_pago,
-                NULL AS deuda_id, NULL AS deuda_original, NULL AS deuda_pagada, NULL AS deuda_pendiente, NULL AS deuda_estado
+                NULL AS deuda_id, NULL AS deuda_original, NULL AS deuda_pagada, NULL AS deuda_pendiente, NULL AS deuda_estado,
+                COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
+                           WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado), 0) AS descuentos,
+                (SELECT GROUP_CONCAT(CONCAT(COALESCE(td.tde_descripcion, 'DESCUENTO'), ': ', FORMAT(dd.nde_valor, 2)) SEPARATOR ' | ')
+                   FROM RPJ_PRC_NOMINA_DESCUENTO dd LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_id = dd.nde_tipo_descuento
+                  WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado) AS detalle_desc,
+                IF(p.ppl_estado_proceso = 'GENERADA', 1, 0) AS en_proceso
            FROM RPJ_PRC_NOMINA_INGRESO i
            INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
           WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
             AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'
          UNION ALL
          SELECT d.deu_periodo, NULL, NULL, 0, NULL,
-                d.deu_correlativo, d.deu_monto_original, d.deu_monto_pagado, d.deu_monto_pendiente, d.deu_estado
+                d.deu_correlativo, d.deu_monto_original, d.deu_monto_pagado, d.deu_monto_pendiente, d.deu_estado,
+                0, NULL, 0
            FROM RPJ_PRC_DEUDA_JUBILADO d
           WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL
        ) x
@@ -225,7 +234,22 @@ const historiaCompleta = async (id) => {
   return rows.map((r) => {
     const deuda = toNum(r.deudaOriginal);
     const pct = r.porcentaje === null ? null : toNum(r.porcentaje);
+    const descuentos = toNum(r.descuentos);
+    // Planilla generada y aún sin cerrar: el mes todavía no entra a la deuda.
+    // Se muestra como quedará al cerrar: vale su líquido, sin abono y con saldo completo.
+    if (deuda <= 0 && Number(r.enProceso) === 1) {
+      const liquido = Math.round(Math.max(toNum(r.pensionCompleta) - descuentos, 0) * 100) / 100;
+      return {
+        id: `P${r.periodo}`, periodo: r.periodo, esDeuda: true, enProceso: true,
+        tipoPago: pct === null ? "SIN PAGO" : `${pct}%`,
+        pensionCompleta: toNum(r.pensionCompleta), descuentos, detalleDescuentos: r.detalleDescuentos || "",
+        montoGenerado: liquido, montoPagado: 0, recibidoMes: toNum(r.pagadoMes), saldo: liquido,
+        estado: "EN PROCESO", fechaGeneracion: r.fechaPago
+      };
+    }
     return {
+      descuentos: deuda > 0 && descuentos === 0 ? Math.round(Math.max(toNum(r.pensionCompleta) - deuda, 0) * 100) / 100 : descuentos,
+      detalleDescuentos: r.detalleDescuentos || "",
       id: r.id || `P${r.periodo}`,
       periodo: r.periodo,
       esDeuda: deuda > 0,

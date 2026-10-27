@@ -92,6 +92,87 @@ BEGIN
 END$$
 DELIMITER ;
 
+-- 3b) Descuentos detallados de un mes en la carga histórica --------------------
+-- Inserta, para los jubilados de tmp_hist_mes en ese período, cada descuento por
+-- separado (IGSS, ISR, INTECAP, asociación, préstamos por banco, judiciales) con las
+-- mismas reglas que fn_descuentos_jubilado_mes, para que el estado de cuenta
+-- muestre el detalle. p_solo_sin_renglon = 1: solo a quien aún no tiene renglón.
+DROP PROCEDURE IF EXISTS sp_carga_descuentos_mes;
+DELIMITER $$
+CREATE PROCEDURE sp_carga_descuentos_mes(
+    IN p_id_pla INT, IN p_periodo INT, IN p_mes DATE, IN p_usuario VARCHAR(50), IN p_solo_sin_renglon TINYINT
+)
+BEGIN
+    DECLARE v_dias_mes INT DEFAULT DAY(LAST_DAY(p_mes));
+    DECLARE v_fin DATE DEFAULT LAST_DAY(p_mes);
+    DECLARE v_pct_igss, v_pct_isr, v_pct_intecap DECIMAL(5,2) DEFAULT 0;
+    DECLARE v_monto_asoc DECIMAL(10,2) DEFAULT 0;
+
+    SELECT COALESCE(par_igss, 0), COALESCE(par_isr, 0), COALESCE(par_intecap, 0), COALESCE(par_desc_asociacion, 0)
+      INTO v_pct_igss, v_pct_isr, v_pct_intecap, v_monto_asoc
+      FROM RPJ_CAT_PARAMETRO_GENERAL ORDER BY par_id DESC LIMIT 1;
+
+    DROP TEMPORARY TABLE IF EXISTS tmp_desc_base;
+    CREATE TEMPORARY TABLE tmp_desc_base (
+      id_jubilado INT PRIMARY KEY, devengado DECIMAL(12,2), dias INT,
+      igss TINYINT, isr TINYINT, intecap TINYINT, asoc TINYINT
+    );
+    INSERT INTO tmp_desc_base
+    SELECT m.id_jubilado,
+           ROUND(t.pension * IF(t.periodo_ini = p_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2),
+           IF(t.periodo_ini = p_periodo, v_dias_mes - DAY(t.fecha_jub) + 1, v_dias_mes),
+           COALESCE((SELECT MAX(d.dat_aplica_desc_igss) FROM RPJ_MNT_DATOS_PLANILLA d WHERE d.dat_id_jubilado = m.id_jubilado AND d.dat_tipo_manejo = 2), 0),
+           COALESCE((SELECT MAX(d.dat_aplica_desc_isr) FROM RPJ_MNT_DATOS_PLANILLA d WHERE d.dat_id_jubilado = m.id_jubilado AND d.dat_tipo_manejo = 2), 0),
+           COALESCE((SELECT MAX(d.dat_aplica_intecap) FROM RPJ_MNT_DATOS_PLANILLA d WHERE d.dat_id_jubilado = m.id_jubilado AND d.dat_tipo_manejo = 2), 0),
+           COALESCE((SELECT MAX(d.dat_aplica_dasociacion) FROM RPJ_MNT_DATOS_PLANILLA d WHERE d.dat_id_jubilado = m.id_jubilado AND d.dat_tipo_manejo = 2), 0)
+      FROM tmp_hist_mes m JOIN tmp_hist_jub t ON t.id_jubilado = m.id_jubilado
+     WHERE m.periodo = p_periodo
+       AND (p_solo_sin_renglon = 0 OR NOT EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i
+                                                   WHERE i.nin_id_planilla = p_id_pla AND i.nin_id_jubilado = m.id_jubilado));
+
+    -- IGSS, ISR e INTECAP (porcentaje de la pensión del mes) y asociación (monto fijo).
+    IF v_pct_igss > 0 THEN
+      INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+      SELECT 2, 2, p_id_pla, id_jubilado, 1, ROUND(devengado * v_pct_igss / 100, 2), dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+        FROM tmp_desc_base WHERE igss = 1 AND ROUND(devengado * v_pct_igss / 100, 2) > 0;
+    END IF;
+    IF v_pct_isr > 0 THEN
+      INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+      SELECT 2, 2, p_id_pla, id_jubilado, 2, ROUND(devengado * v_pct_isr / 100, 2), dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+        FROM tmp_desc_base WHERE isr = 1 AND ROUND(devengado * v_pct_isr / 100, 2) > 0;
+    END IF;
+    IF v_pct_intecap > 0 THEN
+      INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+      SELECT 2, 2, p_id_pla, id_jubilado, 3, ROUND(devengado * v_pct_intecap / 100, 2), dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+        FROM tmp_desc_base WHERE intecap = 1 AND ROUND(devengado * v_pct_intecap / 100, 2) > 0;
+    END IF;
+    IF v_monto_asoc > 0 THEN
+      INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+      SELECT 2, 2, p_id_pla, id_jubilado, 8, v_monto_asoc, dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+        FROM tmp_desc_base WHERE asoc = 1;
+    END IF;
+
+    -- Préstamos vigentes en el mes (tipo según el banco; sin préstamo ligado porque es historia).
+    INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+    SELECT 2, 2, p_id_pla, b.id_jubilado, COALESCE(td.tde_id, 9), p.prr_valor_mes, b.dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+      FROM tmp_desc_base b
+      JOIN RPJ_MNT_PRESTAMOS_REGIMEN p ON p.prr_id_jubilado = b.id_jubilado AND p.prr_tipo_manejo = 2
+                                      AND p.prr_fecha_inicio <= v_fin AND p.prr_fecha_fin >= p_mes
+      LEFT JOIN RPJ_CAT_BANCOS bn ON bn.ban_id = p.prr_id_banco
+      LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_descripcion = CONCAT('DESCUENTO PRESTAMO ', bn.ban_descripcion)
+     WHERE p.prr_valor_mes > 0;
+
+    INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+    SELECT 2, 2, p_id_pla, b.id_jubilado, 4, j.dju_valor, b.dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+      FROM tmp_desc_base b
+      JOIN RPJ_MNT_DESC_JUDICIALES j ON j.dju_id_jubilado = b.id_jubilado AND j.dju_tipo_manejo = 2
+                                    AND j.dju_fecha_inicio <= v_fin AND (j.dju_fecha_final IS NULL OR j.dju_fecha_final >= p_mes)
+     WHERE j.dju_valor > 0;
+
+    DROP TEMPORARY TABLE IF EXISTS tmp_desc_base;
+END$$
+DELIMITER ;
+
 -- 4) Carga histórica: planillas mes a mes y deuda rehecha --------------------
 DROP PROCEDURE IF EXISTS sp_carga_historica_jubilados;
 DELIMITER $$
@@ -247,29 +328,16 @@ BEGIN
        WHERE m.periodo = v_periodo;
       SET p_renglones = p_renglones + ROW_COUNT();
 
-      -- Un renglón de descuento con el total del mes (OTROS DESCUENTOS) para que la
-      -- planilla histórica cuadre: ingreso − descuentos = lo pagado.
-      INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
-      SELECT 2, 2, v_id_pla, m.id_jubilado, 9,
-             ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido,
-             IF(t.periodo_ini = v_periodo, v_dias_mes - DAY(t.fecha_jub) + 1, v_dias_mes), 'JUBILADO', 'ADMINISTRATIVA', p_usuario
-        FROM tmp_hist_mes m JOIN tmp_hist_jub t ON t.id_jubilado = m.id_jubilado
-       WHERE m.periodo = v_periodo
-         AND ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido > 0;
+      -- Descuentos del mes, cada uno por separado (ingreso − descuentos = lo pagado).
+      CALL sp_carga_descuentos_mes(v_id_pla, v_periodo, v_mes, p_usuario, 0);
     ELSE
       -- Planilla real anterior a la regla nueva: a quien no tiene renglón se le
       -- agrega como en la historia (porcentaje de su líquido), para que todos queden
       -- completos hasta el mes anterior. Los renglones existentes no se tocan.
       SELECT COUNT(*) INTO v_es_nueva FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_planilla = v_id_pla;
       IF v_es_nueva = 0 THEN
-        INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
-        SELECT 2, 2, v_id_pla, m.id_jubilado, 9,
-               ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido,
-               IF(t.periodo_ini = v_periodo, v_dias_mes - DAY(t.fecha_jub) + 1, v_dias_mes), 'JUBILADO', 'ADMINISTRATIVA', p_usuario
-          FROM tmp_hist_mes m JOIN tmp_hist_jub t ON t.id_jubilado = m.id_jubilado
-         WHERE m.periodo = v_periodo
-           AND ROUND(t.pension * IF(t.periodo_ini = v_periodo, (v_dias_mes - DAY(t.fecha_jub) + 1) / v_dias_mes, 1), 2) - m.liquido > 0
-           AND NOT EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i WHERE i.nin_id_planilla = v_id_pla AND i.nin_id_jubilado = m.id_jubilado);
+        -- Antes del ingreso: solo a quien todavía no tiene renglón en esta planilla.
+        CALL sp_carga_descuentos_mes(v_id_pla, v_periodo, v_mes, p_usuario, 1);
 
         INSERT INTO RPJ_PRC_NOMINA_INGRESO (
           nin_tipo_manejo, nin_id_tipo_planilla, nin_id_planilla, nin_id_jubilado, nin_tipo_ingreso,
