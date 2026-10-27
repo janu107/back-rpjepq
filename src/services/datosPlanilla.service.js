@@ -41,6 +41,12 @@ const validate = (data) => {
   });
   if (!FORMAS_PAGO.includes(String(data.formaPago).toUpperCase())) throw createError("Forma de pago no permitida. Use: ABONO CUENTA, CHEQUE");
   if (data.tipoCuenta && !TIPOS_CUENTA.includes(String(data.tipoCuenta).toUpperCase())) throw createError("Tipo de cuenta no permitido. Use: AHORRO, MONETARIA");
+
+  // Abono a cuenta necesita a qué cuenta depositar; con cheque no aplica.
+  if (String(data.formaPago).toUpperCase() === "ABONO CUENTA") {
+    if (!String(data.tipoCuenta || "").trim()) throw createError("Seleccione el tipo de cuenta (AHORRO o MONETARIA) para pagos con ABONO CUENTA");
+    if (!String(data.cuenta || "").trim()) throw createError("Ingrese el número de cuenta para pagos con ABONO CUENTA");
+  }
 };
 
 const normalize = (data) => upperCaseFields(data, ["formaPago", "tipoCuenta", "cuenta"]);
@@ -90,7 +96,7 @@ const create = async (payload, currentUser) => {
     data.idBanco,
     data.formaPago,
     data.cuenta || "",
-    data.tipoCuenta || null,
+    data.tipoCuenta || "",
     data.aplicaDescIgss ? 1 : 0,
     data.aplicaDescIsr ? 1 : 0,
     data.aplicaIntecap ? 1 : 0,
@@ -117,7 +123,7 @@ const update = async (id, payload, currentUser) => {
     data.idBanco,
     data.formaPago,
     data.cuenta || "",
-    data.tipoCuenta || null,
+    data.tipoCuenta || "",
     data.aplicaDescIgss ? 1 : 0,
     data.aplicaDescIsr ? 1 : 0,
     data.aplicaIntecap ? 1 : 0,
