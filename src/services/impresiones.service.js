@@ -626,35 +626,39 @@ const getNominaJubilados = async (idPlanilla, opciones = {}) => {
   return { planilla, filas, tipoJubilacion: tipo || null };
 };
 
+// Periodo AAAAMM + porcentaje -> "OCT 2023 50%".
+const MES3 = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+const periodoAplicado = (f) => {
+  const p = String(f.periodo_aplicado || "");
+  if (!p) return "";
+  const mes = MES3[Number(p.slice(4, 6)) - 1];
+  const texto = mes ? `${mes} ${p.slice(0, 4)}` : p;
+  return `${texto} ${Number(f.pct_periodo || 0)}%`;
+};
+
 const COLS_JUBILADOS = (doc) => {
-  const anchos = pdf.repartirAnchos(doc, [5, 22, 11, 8, 9, 9, 7, 8, 7, 8, 8, 7, 10, 10]);
+  const anchos = pdf.repartirAnchos(doc, [5, 24, 11, 8, 10, 8, 8, 8, 8, 8, 8, 11, 10]);
   const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
   return [
     c("COD", "codigo", "right", 0),
     c("NOMBRE", "nombre", "left", 1),
     c("PENSION", "tipo_jubilacion", "left", 2),
     c("FECHA", "fecha_jubilacion", "center", 3, (f) => fecha(f.fecha_jubilacion)),
-    // Pensión completa del jubilado; P. MENSUAL es lo que entra en esta planilla
-    // (porcentaje del líquido + descuentos).
     c("PENSION TOTAL", "pension_total", "right", 4, (f) => q(f.pension_total)),
-    c("P. MENSUAL", "pension_mensual", "right", 5, (f) => q(f.pension_mensual)),
-    c("DESC. ASOC.", "desc_asociacion", "right", 6, (f) => q(f.desc_asociacion)),
-    c("DESC. PREST.", "desc_prestamos", "right", 7, (f) => q(f.desc_prestamos)),
-    c("D. JUDICIAL", "desc_judicial", "right", 8, (f) => q(f.desc_judicial)),
-    c("D. BANRURAL", "desc_banrural", "right", 9, (f) => q(f.desc_banrural)),
-    c("D. BANTRAB", "desc_bantrab", "right", 10, (f) => q(f.desc_bantrab)),
-    // IGSS, ISR e INTECAP van juntos: sin esta columna la fila no cuadraba
-    // (P. MENSUAL menos los descuentos visibles no daba el líquido).
-    c("OTROS DESC.", "desc_otros", "right", 11, (f) => q(f.desc_otros)),
-    c("PERIODO APLICADO", "periodo_aplicado", "center", 12,
-      (f) => (f.periodo_aplicado ? `${f.periodo_aplicado}  ${Number(f.pct_periodo || 0)}%` : "")),
-    c("LIQ. A RECIBIR", "liquido", "right", 13, (f) => q(f.liquido))
+    c("DESC. ASOC.", "desc_asociacion", "right", 5, (f) => q(f.desc_asociacion)),
+    c("DESC. PREST.", "desc_prestamos", "right", 6, (f) => q(f.desc_prestamos)),
+    c("D. JUDICIAL", "desc_judicial", "right", 7, (f) => q(f.desc_judicial)),
+    c("D. BANRURAL", "desc_banrural", "right", 8, (f) => q(f.desc_banrural)),
+    c("D. BANTRAB", "desc_bantrab", "right", 9, (f) => q(f.desc_bantrab)),
+    // IGSS, ISR e INTECAP van juntos.
+    c("OTROS DESC.", "desc_otros", "right", 10, (f) => q(f.desc_otros)),
+    c("PERIODO APLICADO", "periodo_aplicado", "center", 11, periodoAplicado),
+    c("LIQ. A RECIBIR", "liquido", "right", 12, (f) => q(f.liquido))
   ];
 };
 
 const totalesJubilados = (filas) => ({
   pension_total: q(sumar(filas, "pension_total")),
-  pension_mensual: q(sumar(filas, "pension_mensual")),
   desc_asociacion: q(sumar(filas, "desc_asociacion")),
   desc_prestamos: q(sumar(filas, "desc_prestamos")),
   desc_judicial: q(sumar(filas, "desc_judicial")),
@@ -842,7 +846,6 @@ const excelNominaJubilados = async (idPlanilla, opciones = {}) => {
     { titulo: "PENSION", campo: "tipo_jubilacion", ancho: 22 },
     { titulo: "FECHA", campo: "fecha_jubilacion", ancho: 12, fecha: true },
     { titulo: "PENSION TOTAL", campo: "pension_total", ancho: 15, monto: true },
-    { titulo: "P. MENSUAL", campo: "pension_mensual", ancho: 14, monto: true },
     { titulo: "DESC. ASOC.", campo: "desc_asociacion", ancho: 12, monto: true },
     { titulo: "DESC. PREST.", campo: "desc_prestamos", ancho: 12, monto: true },
     { titulo: "D. JUDICIAL", campo: "desc_judicial", ancho: 12, monto: true },
@@ -899,7 +902,7 @@ const excelNominaJubilados = async (idPlanilla, opciones = {}) => {
     encabezadoTabla();
     lista.forEach((f, k) => {
       const r = ws.addRow(columnas.map((c) => {
-        if (c.campo === "periodo") return f.periodo_aplicado ? `${f.periodo_aplicado}  ${Number(f.pct_periodo || 0)}%` : "";
+        if (c.campo === "periodo") return periodoAplicado(f);
         if (c.fecha) return f[c.campo] ? fecha(f[c.campo]) : "";
         return c.monto ? Number(f[c.campo] || 0) : f[c.campo];
       }));
