@@ -6,7 +6,7 @@ const saldos = async (req, res, next) => { try { return successResponse(res, awa
 const pagos = async (req, res, next) => { try { return successResponse(res, await service.pagos(req.query.desde, req.query.hasta, req.query.idJubilado, req.query.q), "Reporte de pagos"); } catch (e) { next(e); } };
 const beneficiariosActivos = async (req, res, next) => { try { return successResponse(res, await service.beneficiariosActivos(), "Beneficiarios activos"); } catch (e) { next(e); } };
 const convenios = async (req, res, next) => { try { return successResponse(res, await service.convenios(), "Reporte de convenios"); } catch (e) { next(e); } };
-const deudaPorTipo = async (req, res, next) => { try { return successResponse(res, await service.deudaPorTipo(), "Deuda por tipo"); } catch (e) { next(e); } };
+const deudaPorTipo = async (req, res, next) => { try { return successResponse(res, await service.deudaPorTipo(req.query.q), "Deuda por tipo"); } catch (e) { next(e); } };
 const amparistas = async (req, res, next) => { try { return successResponse(res, await service.amparistas(), "Reporte de amparistas"); } catch (e) { next(e); } };
 
 const pdf = async (req, res, next) => {

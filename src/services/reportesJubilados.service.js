@@ -110,13 +110,107 @@ const convenios = async () => {
   return rows.map((r) => ({ ...r, deudaTotal: toNum(r.deudaTotal), montoCuota: toNum(r.montoCuota), cuotas: toNum(r.cuotas) }));
 };
 
-const deudaPorTipo = async () => {
+// Deuda pendiente por tipo de jubilación (retiro voluntario, viudez, orfandad...),
+// con el detalle de los jubilados de cada tipo. q filtra jubilados.
+const deudaPorTipo = async (q) => {
+  const busq = condBusqueda(q, "j");
   const [rows] = await pool.query(`
-    SELECT deu_tipo_pago AS tipoPago,
-           SUM(CASE WHEN deu_estado IN ('PENDIENTE','PARCIAL') THEN 1 ELSE 0 END) AS periodosDeuda,
-           COALESCE(SUM(CASE WHEN deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_monto_pendiente ELSE 0 END),0) AS saldo
-      FROM RPJ_PRC_DEUDA_JUBILADO GROUP BY deu_tipo_pago`);
-  return rows.map((r) => ({ tipoPago: r.tipoPago, periodosDeuda: toNum(r.periodosDeuda), saldo: toNum(r.saldo) }));
+    SELECT COALESCE(tj.tju_descripcion, 'SIN CLASIFICAR') AS tipoJubilacion,
+           j.jub_correlativo AS idJubilado, j.jub_id AS codigo,
+           CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS nombre, j.jub_dpi AS dpi,
+           COUNT(*) AS meses, MIN(d.deu_periodo) AS desde, MAX(d.deu_periodo) AS hasta,
+           SUM(d.deu_monto_pendiente) AS saldo
+      FROM RPJ_PRC_DEUDA_JUBILADO d
+      JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = d.deu_id_jubilado
+      LEFT JOIN RPJ_CAT_TIPO_JUBILACION tj ON tj.tju_id = j.jub_tipo_jubilacion
+     WHERE d.deu_estado IN ('PENDIENTE','PARCIAL') ${busq.cond.length ? `AND ${busq.cond.join(" AND ")}` : ""}
+     GROUP BY tipoJubilacion, j.jub_correlativo, j.jub_id, nombre, j.jub_dpi
+     ORDER BY tipoJubilacion, saldo DESC`, busq.params);
+
+  const tipos = new Map();
+  rows.forEach((r) => {
+    if (!tipos.has(r.tipoJubilacion)) tipos.set(r.tipoJubilacion, { tipoJubilacion: r.tipoJubilacion, jubilados: 0, periodosDeuda: 0, saldo: 0, detalle: [] });
+    const t = tipos.get(r.tipoJubilacion);
+    const fila = {
+      idJubilado: r.idJubilado, codigo: r.codigo, nombre: r.nombre, dpi: r.dpi,
+      meses: toNum(r.meses), desde: r.desde, hasta: r.hasta, saldo: toNum(r.saldo)
+    };
+    t.detalle.push(fila);
+    t.jubilados += 1;
+    t.periodosDeuda += fila.meses;
+    t.saldo = Math.round((t.saldo + fila.saldo) * 100) / 100;
+  });
+  const total = [...tipos.values()].reduce((a, t) => a + t.saldo, 0);
+  return [...tipos.values()]
+    .map((t) => ({ ...t, porcentaje: total > 0 ? Math.round((t.saldo / total) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.saldo - a.saldo);
+};
+
+const periodoTexto = (p) => {
+  const MES3 = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const s = String(p || "");
+  return s.length === 6 ? `${MES3[Number(s.slice(4, 6)) - 1] || s.slice(4, 6)} ${s.slice(0, 4)}` : s;
+};
+
+// PDF de deuda por tipo: resumen por tipo y después el detalle de cada tipo con subtotal.
+const pdfDeudaPorTipo = async (filtros, usuario) => {
+  const L = require("../utils/pdfLayout");
+  const tipos = await deudaPorTipo(filtros.q);
+  const doc = L.nuevoDoc({ size: "LETTER", layout: "landscape", margin: 30 });
+  const nJub = tipos.reduce((a, t) => a + t.jubilados, 0);
+  const cabecera = (d) => L.encabezado(d, {
+    titulo: "Reporte de deuda por tipo de jubilación",
+    subtitulo: `Generado el ${L.fechaLarga()}  ·  ${nJub} jubilado(s) con deuda`,
+    lineas: filtros.q ? [`Filtros: Búsqueda: "${String(filtros.q).trim()}"`] : []
+  });
+  cabecera(doc);
+  if (!tipos.length) {
+    doc.font("Helvetica").fontSize(9).text("No hay deuda pendiente con los filtros aplicados.", { align: "center" });
+    L.pieDePagina(doc, usuario);
+    return { buffer: await L.aBuffer(doc), filename: "deuda-por-tipo.pdf" };
+  }
+
+  // Resumen
+  const aR = L.repartirAnchos(doc, [40, 14, 16, 20, 10]);
+  const colsR = [
+    { titulo: "TIPO DE JUBILACIÓN", campo: "tipoJubilacion", align: "left", ancho: aR[0] },
+    { titulo: "JUBILADOS", campo: "jubilados", align: "right", ancho: aR[1] },
+    { titulo: "MESES ADEUDADOS", campo: "periodosDeuda", align: "right", ancho: aR[2] },
+    { titulo: "SALDO", campo: "saldo", align: "right", ancho: aR[3], valor: (f) => L.q(f.saldo) },
+    { titulo: "% DEL TOTAL", campo: "porcentaje", align: "right", ancho: aR[4], valor: (f) => `${f.porcentaje}%` }
+  ];
+  doc.font("Helvetica-Bold").fontSize(9).text("RESUMEN POR TIPO DE JUBILACIÓN");
+  doc.moveDown(0.2);
+  L.dibujarTabla(doc, colsR, tipos, { fuente: 8, alturaFila: 14, altoEncabezado: 18, alRepetirEncabezado: cabecera });
+  const suma = (campo) => tipos.reduce((a, t) => a + Number(t[campo] || 0), 0);
+  L.filaTotales(doc, colsR, {
+    jubilados: String(suma("jubilados")), periodosDeuda: String(suma("periodosDeuda")),
+    saldo: L.q(suma("saldo")), porcentaje: "100%"
+  }, "TOTAL", 1, { fuente: 8 });
+
+  // Detalle por tipo
+  const aD = L.repartirAnchos(doc, [7, 36, 15, 8, 10, 10, 14]);
+  const colsD = [
+    { titulo: "CÓDIGO", campo: "codigo", align: "right", ancho: aD[0] },
+    { titulo: "JUBILADO", campo: "nombre", align: "left", ancho: aD[1] },
+    { titulo: "DPI", campo: "dpi", align: "left", ancho: aD[2] },
+    { titulo: "MESES", campo: "meses", align: "right", ancho: aD[3] },
+    { titulo: "DESDE", campo: "desde", align: "center", ancho: aD[4], valor: (f) => periodoTexto(f.desde) },
+    { titulo: "HASTA", campo: "hasta", align: "center", ancho: aD[5], valor: (f) => periodoTexto(f.hasta) },
+    { titulo: "SALDO", campo: "saldo", align: "right", ancho: aD[6], valor: (f) => L.q(f.saldo) }
+  ];
+  tipos.forEach((t) => {
+    doc.moveDown(0.8);
+    if (doc.y + 60 > doc.page.height - doc.page.margins.bottom) { doc.addPage(); cabecera(doc); }
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000")
+      .text(`${t.tipoJubilacion}  —  ${t.jubilados} jubilado(s)  ·  ${L.q(t.saldo)}`, doc.page.margins.left);
+    doc.moveDown(0.2);
+    L.dibujarTabla(doc, colsD, t.detalle, { fuente: 7.5, alturaFila: 13, altoEncabezado: 16, reservaInferior: 20, alRepetirEncabezado: cabecera });
+    L.filaTotales(doc, colsD, { meses: String(t.periodosDeuda), saldo: L.q(t.saldo) }, `TOTAL ${t.tipoJubilacion}`, 3, { fuente: 7.5 });
+  });
+
+  L.pieDePagina(doc, usuario);
+  return { buffer: await L.aBuffer(doc), filename: "deuda-por-tipo.pdf" };
 };
 
 const amparistas = async () => {
@@ -187,8 +281,9 @@ const REPORTES_PDF = {
     ]
   },
   "deuda-por-tipo": {
-    titulo: "Reporte de deuda por tipo de pago",
-    datos: () => deudaPorTipo(),
+    titulo: "Reporte de deuda por tipo de jubilación",
+    generar: (filtros, usuario) => pdfDeudaPorTipo(filtros, usuario),
+    datos: (f) => deudaPorTipo(f.q),
     columnas: [
       { titulo: "TIPO DE PAGO", campo: "tipoPago", peso: 30 },
       { titulo: "PERÍODOS", campo: "periodosDeuda", peso: 15, align: "right", total: "suma0" },
@@ -212,6 +307,7 @@ const REPORTES_PDF = {
 const pdfReporte = async (nombre, filtros = {}, usuario) => {
   const def = REPORTES_PDF[nombre];
   if (!def) { const e = new Error("Reporte no encontrado"); e.status = 404; throw e; }
+  if (def.generar) return def.generar(filtros, usuario);
   const L = require("../utils/pdfLayout");
   const filas = await def.datos(filtros);
 
