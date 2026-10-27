@@ -40,4 +40,4 @@ LEFT JOIN (
   GROUP BY nde_id_planilla
 ) des ON des.nde_id_planilla = p.ppl_correlativo
 WHERE p.ppl_tipo_planilla = 1
-ORDER BY p.ppl_correlativo DESC;
+ORDER BY p.ppl_numero DESC, p.ppl_correlativo DESC;

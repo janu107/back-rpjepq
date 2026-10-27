@@ -1,5 +1,6 @@
 SELECT
   id_empleado,
+  (SELECT e.emp_id FROM RPJ_MNT_EMPLEADO e WHERE e.emp_correlativo = id_empleado) AS codigo,
   emp_dpi,
   nombre_completo,
   emp_fecha_ingreso,

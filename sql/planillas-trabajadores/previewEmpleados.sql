@@ -3,6 +3,7 @@
 -- Se informa además si tiene salario configurado (si no, generaría Q0.00).
 SELECT
   e.emp_correlativo                                   AS id_empleado,
+  e.emp_id                                            AS codigo,
   e.emp_dpi                                           AS dpi,
   CONCAT(e.emp_nombres, ' ', e.emp_apellidos)         AS nombre_completo,
   e.emp_profesion_oficio                              AS puesto,

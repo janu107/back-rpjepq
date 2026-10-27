@@ -39,6 +39,7 @@ const mapPlanilla = (row) => ({
 
 const mapDetalle = (row) => ({
   idEmpleado: row.id_empleado,
+  codigo: row.codigo,
   dpi: row.emp_dpi,
   nombreCompleto: row.nombre_completo,
   fechaIngreso: row.emp_fecha_ingreso,
@@ -119,6 +120,7 @@ const mapEmpleadoPreview = (e) => {
   const apto = Boolean(e.tiene_datos) && Boolean(e.aplica_nomina);
   return {
     idEmpleado: e.id_empleado,
+    codigo: e.codigo,
     dpi: e.dpi,
     nombreCompleto: e.nombre_completo,
     puesto: e.puesto,
@@ -248,7 +250,11 @@ const editarMontos = async (id, idEmpleado, payload, currentUser) => {
   const descuentos = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
   // Renglones agregados a mano (tipo de ingreso o descuento que no generó el proceso).
   const nuevos = tiposMonto.validarNuevos(payload?.nuevos, createError);
-  if (!ingresos.length && !descuentos.length && !nuevos.length) throw createError("No se recibieron montos para actualizar");
+  // Renglones a borrar: [{ clase: "INGRESO" | "DESCUENTO", id }]
+  const eliminar = (Array.isArray(payload?.eliminar) ? payload.eliminar : [])
+    .map((e) => ({ clase: String(e?.clase || "").toUpperCase(), id: Number(e?.id) }))
+    .filter((e) => ["INGRESO", "DESCUENTO"].includes(e.clase) && Number.isInteger(e.id) && e.id > 0);
+  if (!ingresos.length && !descuentos.length && !nuevos.length && !eliminar.length) throw createError("No se recibieron montos para actualizar");
 
   const valido = (v) => v !== undefined && v !== null && !Number.isNaN(Number(v)) && Number(v) >= 0;
   for (const ing of ingresos) if (!valido(ing.valor)) throw createError("Los montos de ingreso deben ser números mayores o iguales a 0");
@@ -260,11 +266,49 @@ const editarMontos = async (id, idEmpleado, payload, currentUser) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+
+    // Borrar renglones. Un descuento de préstamo o judicial devuelve su cuota al
+    // saldo (la generación ya la había rebajado). No se permite dejar a la persona
+    // sin ingresos: para sacarla de la planilla está "Reversar pago".
+    const borrarIngresos = eliminar.filter((e) => e.clase === "INGRESO").map((e) => e.id);
+    if (borrarIngresos.length) {
+      const [[cuenta]] = await conn.query(
+        "SELECT COUNT(*) AS total, SUM(nin_correlativo IN (?)) AS borrar FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla = ? AND nin_id_empleado = ?",
+        [borrarIngresos, id, idEmpleado]);
+      if (toNum(cuenta.borrar) >= toNum(cuenta.total)) {
+        throw createError("No se puede borrar el único ingreso. Para quitar a la persona de la planilla use \"Reversar pago\".");
+      }
+      await conn.query("DELETE FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_correlativo IN (?) AND nin_id_planilla = ? AND nin_id_empleado = ?",
+        [borrarIngresos, id, idEmpleado]);
+    }
+    for (const e of eliminar.filter((x) => x.clase === "DESCUENTO")) {
+      const [[d]] = await conn.query(
+        "SELECT nde_tipo_descuento AS tipo, nde_valor AS valor, nde_id_prestamo AS prestamo FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_correlativo = ? AND nde_id_planilla = ? AND nde_id_empleado = ?",
+        [e.id, id, idEmpleado]);
+      if (!d) continue;
+      if (d.prestamo) {
+        await conn.query("UPDATE RPJ_MNT_PRESTAMOS_REGIMEN SET prr_saldo = prr_saldo + ?, prr_estado = 'ACTIVO' WHERE prr_correlativo = ?", [d.valor, d.prestamo]);
+      } else if ([5, 6, 7].includes(Number(d.tipo))) {
+        // Descuentos de préstamo sin préstamo ligado: tipo 5/6/7 = banco 1/2/3.
+        await conn.query(
+          "UPDATE RPJ_MNT_PRESTAMOS_REGIMEN SET prr_saldo = prr_saldo + ?, prr_estado = 'ACTIVO' WHERE prr_id_empleado = ? AND prr_tipo_manejo = 1 AND prr_id_banco = ? ORDER BY prr_correlativo LIMIT 1",
+          [d.valor, idEmpleado, Number(d.tipo) - 4]);
+      } else if (Number(d.tipo) === 4) {
+        await conn.query(
+          "UPDATE RPJ_MNT_DESC_JUDICIALES SET dju_saldo = dju_saldo + ?, dju_estado = 'ACTIVO' WHERE dju_id_empleado = ? AND dju_tipo_manejo = 1 ORDER BY dju_correlativo LIMIT 1",
+          [d.valor, idEmpleado]);
+      }
+      await conn.query("DELETE FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_correlativo = ?", [e.id]);
+    }
+    const borrados = new Set(eliminar.map((e) => `${e.clase}-${e.id}`));
+
     for (const ing of ingresos) {
+      if (borrados.has(`INGRESO-${ing.id}`)) continue;
       const valor = toNum(ing.valor);
       await conn.execute(sql("actualizarMontoIngreso"), [valor, valor, ing.id, id, idEmpleado]);
     }
     for (const des of descuentos) {
+      if (borrados.has(`DESCUENTO-${des.id}`)) continue;
       await conn.execute(sql("actualizarMontoDescuento"), [toNum(des.valor), des.id, id, idEmpleado]);
     }
     for (const n of nuevos) {
