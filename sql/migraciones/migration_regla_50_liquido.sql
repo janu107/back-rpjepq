@@ -309,11 +309,10 @@ BEGIN
     SET v_mes = DATE_ADD(v_mes, INTERVAL 1 MONTH);
   END WHILE;
 
-  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido.
-  --   - Meses de la carga histórica (o planillas anteriores a la regla nueva): lo
-  --     pagado se abona a ESE mes, así la deuda empieza en el período indicado.
-  --   - Nóminas con la regla nueva: su pago se abona a los meses más antiguos,
-  --     igual que cuando se generaron (repetir la carga no las mueve).
+  -- Deuda rehecha: cada mes desde el período de deuda vale su líquido y TODO lo
+  -- pagado desde entonces se abona a los meses más antiguos (acordado con el
+  -- contador, 2026-10-27): los meses que aún no les toca quedan con la pensión
+  -- completa pendiente y abonado 0; solo el mes "en turno" queda parcial.
   -- Nóminas cerradas (regla nueva) de meses posteriores al rango (p. ej. el mes en curso).
   INSERT IGNORE INTO tmp_hist_mes (id_jubilado, periodo, liquido, pagado, id_planilla, fifo)
   SELECT d.deu_id_jubilado, d.deu_periodo, d.deu_monto_original,
@@ -347,9 +346,9 @@ BEGIN
                    SUM(f.exceso) OVER (PARTITION BY f.id_jubilado) AS sobrante
               FROM (
                 SELECT m.id_jubilado, m.periodo, m.id_planilla, m.liquido,
-                       IF(m.fifo = 1, 0, LEAST(m.pagado, m.liquido))                         AS propio,
-                       m.liquido - IF(m.fifo = 1, 0, LEAST(m.pagado, m.liquido))             AS resto,
-                       IF(m.fifo = 1, m.pagado, GREATEST(m.pagado - m.liquido, 0))           AS exceso
+                       0                                                AS propio,
+                       m.liquido                                        AS resto,
+                       m.pagado                                         AS exceso
                   FROM tmp_hist_mes m
                  WHERE m.periodo >= p_periodo_deuda
               ) f

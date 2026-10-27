@@ -42,8 +42,12 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const n = mesesEntre(PERIODO_DEUDA, periodoFin);
   const dJ = await deudas(1);
   ok(dJ.length === n && dJ.every((d) => eq(d.o, 5985)), `Juan: ${n} meses adeudados de 5,985 desde ${PERIODO_DEUDA}`);
-  ok(dJ.every((d) => d.e === "PARCIAL" && eq(d.pend, 2992.50)), "Juan: cada mes desde el inicio queda con la mitad pendiente (2,992.50)");
   ok(dJ[0].p === PERIODO_DEUDA, "Juan: la deuda empieza en el período indicado");
+  ok(dJ.filter((d) => d.e === "PAGADA").length === Math.floor(n / 2) && dJ[0].e === "PAGADA",
+    `Juan: lo pagado completa los ${Math.floor(n / 2)} meses más antiguos`);
+  ok(dJ.filter((d) => d.e === "PARCIAL").length <= 1, "Juan: a lo sumo un mes queda parcial (el que está en turno)");
+  ok(dJ.filter((d) => d.e === "PENDIENTE").every((d) => eq(d.pg, 0) && eq(d.pend, 5985)),
+    "Juan: los meses que aún no les toca quedan con la pensión completa pendiente y abonado 0");
   ok(eq(await pendiente(1), r2(n * 5985 / 2)), `Juan: debe la mitad de todo lo devengado = ${r2(n * 5985 / 2)}`);
   const [febJuan] = await q("SELECT i.nin_valor v, i.nin_porcentaje_aplicado pct FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo=i.nin_id_planilla WHERE p.ppl_numero=202212 AND i.nin_id_jubilado=1");
   ok(febJuan && eq(febJuan.pct, 100) && eq(febJuan.v, 8000), "Juan: diciembre 2022 se pagó completo (planilla histórica al 100%)");
@@ -58,8 +62,8 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dB = await deudas(3);
   ok(eq(dB.find((d) => d.p === 202312).o, 4985) && eq(dB.find((d) => d.p === 202401).o, 4485), "Beto: el préstamo cuenta solo en los meses vigentes (dic-23 4,985; ene-24 4,485)");
   ok((await deudas(5)).length === 0, "Elsa (sin pensión registrada): no genera deuda");
-  const mesAnt = (await deudas(1)).find((d) => d.p === periodoFin);
-  ok(mesAnt && mesAnt.e === "PARCIAL" && eq(mesAnt.pend, 2992.50), "Juan: el mes anterior (planilla real sin su renglón) se completa al 50%");
+  const [[renJuan]] = await c.query("SELECT COUNT(*) n FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=899 AND nin_id_jubilado=1");
+  ok(renJuan.n === 1, "Juan: el mes anterior (planilla real sin su renglón) se completa con su pago del 50%");
   const [[betoAnt]] = await c.query("SELECT nin_valor v FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=899 AND nin_id_jubilado=3");
   ok(betoAnt && eq(betoAnt.v, 2500), "Beto: su renglón real del mes anterior no se toca");
 
@@ -103,12 +107,14 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
 
   console.log("== CERRAR: el mes entra a la deuda y el pago se abona al mes más antiguo");
   const pendAntesCierre = await pendiente(1);
+  const turnoAntes = (await deudas(1)).find((d) => d.e !== "PAGADA");
   await c.query("CALL sp_cuadrar_planilla_pensionados(900, 'prueba', @aj)");
   await c.query("CALL sp_cerrar_planilla(900, 'prueba')");
   const dC = await deudas(1);
   const mesC = dC.find((d) => d.p === periodoActual);
   ok(mesC && eq(mesC.o, 5985) && eq(mesC.pend, 5985) && mesC.pla === 900, "el mes actual queda como deuda de 5,985 (100%)");
-  ok(dC[0].e === "PAGADA" && dC[1].e === "PARCIAL", "el pago completa el mes más antiguo (enero queda PAGADO)");
+  const [[aplicadoA]] = await c.query("SELECT MIN(apa_periodo_deuda) p FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
+  ok(turnoAntes && aplicadoA.p === turnoAntes.p, `el pago se abona al mes en turno (${turnoAntes && turnoAntes.p})`);
   ok(eq(await pendiente(1), r2(pendAntesCierre + 5985 - 2992.50)), "la deuda de Juan crece medio mes (+2,992.50)");
   const [[apl]] = await c.query("SELECT SUM(apa_monto_aplicado) t FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
   ok(eq(apl.t, 2992.50), "lo aplicado a la deuda = lo que recibe Juan");
