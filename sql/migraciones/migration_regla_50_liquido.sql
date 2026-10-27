@@ -428,6 +428,28 @@ BEGIN
       ) x
      WHERE x.liquido > 0;
     SET p_deudas = ROW_COUNT();
+
+    -- Registro de qué nómina abonó a qué mes (se rehace igual que la deuda): el pago
+    -- de cada nómina cerrada cubre, en orden, el tramo de deuda que le corresponde.
+    INSERT INTO RPJ_PRC_APLICACION_PAGO
+      (apa_id_planilla, apa_id_jubilado, apa_id_deuda, apa_periodo_deuda, apa_monto_aplicado, apa_fecha_aplicacion, apa_observaciones, apa_usuario_creacion)
+    SELECT pg.id_planilla, dd.deu_id_jubilado, dd.deu_correlativo, dd.deu_periodo,
+           LEAST(pg.c_fin, dd.a_fin) - GREATEST(pg.c_fin - pg.pagado, dd.a_fin - dd.deu_monto_original),
+           CURDATE(), CONCAT('Abono al periodo ', dd.deu_periodo), p_usuario
+      FROM (
+        SELECT m.id_jubilado, m.id_planilla, m.pagado,
+               SUM(m.pagado) OVER (PARTITION BY m.id_jubilado ORDER BY m.periodo) AS c_fin
+          FROM tmp_hist_mes m
+         WHERE m.fifo = 1 AND m.pagado > 0 AND m.periodo >= p_periodo_deuda
+      ) pg
+      JOIN (
+        SELECT d.deu_correlativo, d.deu_id_jubilado, d.deu_periodo, d.deu_monto_original,
+               SUM(d.deu_monto_original) OVER (PARTITION BY d.deu_id_jubilado ORDER BY d.deu_periodo) AS a_fin
+          FROM RPJ_PRC_DEUDA_JUBILADO d
+         WHERE d.deu_id_jubilado IN (SELECT t.id_jubilado FROM tmp_hist_jub t)
+      ) dd ON dd.deu_id_jubilado = pg.id_jubilado
+     WHERE LEAST(pg.c_fin, dd.a_fin) - GREATEST(pg.c_fin - pg.pagado, dd.a_fin - dd.deu_monto_original) > 0.004;
+
     SELECT COUNT(*) INTO p_deudas_ajustadas FROM RPJ_PRC_DEUDA_JUBILADO d JOIN tmp_hist_jub t ON t.id_jubilado = d.deu_id_jubilado
      WHERE d.deu_estado IN ('PENDIENTE', 'PARCIAL');
   END IF;

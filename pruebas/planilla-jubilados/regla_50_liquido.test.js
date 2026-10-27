@@ -134,6 +134,8 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   ok(despues.length === antes.length && despues.every((d, k) => eq(d.pg, antes[k].pg) && eq(d.o, antes[k].o)),
     "repetir la carga respeta lo que pagó la nómina cerrada: cada mes queda igual");
   ok(despues.some((d) => d.p === periodoActual && d.pla === 900), "el mes de la nómina cerrada se conserva");
+  const [[apaJuan]] = await c.query("SELECT SUM(apa_monto_aplicado) t, MIN(apa_periodo_deuda) p FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
+  ok(eq(apaJuan.t, 2992.50) && apaJuan.p === PERIODO_DEUDA, "tras repetir la carga se conserva con qué nómina se pagó cada mes");
 
   await c.end();
   console.log(fallas ? `\n❌ ${fallas} verificaciones fallaron` : "\n✅ Todas las verificaciones pasaron");
