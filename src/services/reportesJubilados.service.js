@@ -29,28 +29,52 @@ const dashboardResumen = async () => {
   };
 };
 
-const saldos = async () => {
+// Búsqueda por código, nombres, apellidos o DPI. Cada palabra debe aparecer en
+// alguno de esos campos ("garcia valdez" encuentra a RAFAEL ESTUARDO GARCIA VALDEZ).
+// alias: tabla de jubilados; aliasBen (opcional): tabla de beneficiarios.
+const condBusqueda = (q, alias = "j", aliasBen = null) => {
+  const palabras = String(q || "").trim().split(/\s+/).filter(Boolean).slice(0, 6);
+  const cond = []; const params = [];
+  palabras.forEach((w) => {
+    const like = `%${w}%`;
+    const partes = [`${alias}.jub_nombres LIKE ?`, `${alias}.jub_apellidos LIKE ?`, `${alias}.jub_dpi LIKE ?`];
+    const p = [like, like, like];
+    if (/^\d+$/.test(w)) { partes.push(`${alias}.jub_id = ?`); p.push(Number(w)); }
+    if (aliasBen) {
+      partes.push(`${aliasBen}.ben_nombres LIKE ?`, `${aliasBen}.ben_apellidos LIKE ?`, `${aliasBen}.ben_dpi LIKE ?`);
+      p.push(like, like, like);
+    }
+    cond.push(`(${partes.join(" OR ")})`); params.push(...p);
+  });
+  return { cond, params };
+};
+
+const saldos = async (q) => {
+  const busq = condBusqueda(q, "j");
   const [rows] = await pool.query(`
-    SELECT j.jub_correlativo AS idJubilado, CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre, j.jub_dpi AS dpi,
+    SELECT j.jub_correlativo AS idJubilado, j.jub_id AS codigo, CONCAT(j.jub_nombres,' ',j.jub_apellidos) AS nombre, j.jub_dpi AS dpi,
            j.jub_tipo_pago AS tipoPago, j.jub_estado_pago AS estadoPago,
            COALESCE(SUM(CASE WHEN d.deu_estado IN ('PENDIENTE','PARCIAL') THEN d.deu_monto_pendiente ELSE 0 END),0) AS saldo,
            COALESCE(SUM(CASE WHEN d.deu_estado IN ('PENDIENTE','PARCIAL') THEN 1 ELSE 0 END),0) AS mesesAdeudados
       FROM RPJ_MNT_JUBILADO j
       LEFT JOIN RPJ_PRC_DEUDA_JUBILADO d ON d.deu_id_jubilado=j.jub_correlativo
-     WHERE j.jub_tipo_manejo=2
-     GROUP BY j.jub_correlativo HAVING saldo > 0 ORDER BY saldo DESC`);
+     WHERE j.jub_tipo_manejo=2 ${busq.cond.length ? `AND ${busq.cond.join(" AND ")}` : ""}
+     GROUP BY j.jub_correlativo HAVING saldo > 0 ORDER BY saldo DESC`, busq.params);
   return rows.map((r) => ({ ...r, saldo: toNum(r.saldo), mesesAdeudados: toNum(r.mesesAdeudados) }));
 };
 
-const pagos = async (desde, hasta, idJubilado) => {
+const pagos = async (desde, hasta, idJubilado, q) => {
   const cond = ["i.nin_tipo_manejo=2", "p.ppl_estado_proceso <> 'REVERSADA'"];
   const params = [];
   if (idJubilado) { cond.push("i.nin_id_jubilado = ?"); params.push(Number(idJubilado)); }
+  const busq = condBusqueda(q, "j", "b");
+  cond.push(...busq.cond); params.push(...busq.params);
   if (desde) { cond.push("p.ppl_fecha_pago >= ?"); params.push(desde); }
   if (hasta) { cond.push("p.ppl_fecha_pago <= ?"); params.push(hasta); }
   const [rows] = await pool.query(`
     SELECT i.nin_correlativo AS id, p.ppl_numero AS periodo, p.ppl_fecha_pago AS fechaPago,
            i.nin_id_tipo_planilla AS tipoPlanilla, i.nin_id_jubilado AS idJubilado, i.nin_id_beneficiario AS idBeneficiario,
+           j.jub_id AS codigo,
            COALESCE(CONCAT(j.jub_nombres,' ',j.jub_apellidos), CONCAT(b.ben_nombres,' ',b.ben_apellidos)) AS beneficiario,
            i.nin_valor AS total, i.nin_pago_corriente AS pagoCorriente, i.nin_abono_historico AS abono,
            i.nin_porcentaje_aplicado AS porcentaje
@@ -59,7 +83,7 @@ const pagos = async (desde, hasta, idJubilado) => {
       LEFT JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo=i.nin_id_jubilado
       LEFT JOIN RPJ_MNT_BENEFICIARIO b ON b.ben_correlativo=i.nin_id_beneficiario
      WHERE ${cond.join(" AND ")}
-     ORDER BY p.ppl_fecha_pago DESC, i.nin_correlativo DESC LIMIT ${idJubilado ? 2000 : 500}`, params);
+     ORDER BY p.ppl_fecha_pago DESC, i.nin_correlativo DESC LIMIT ${idJubilado || busq.cond.length ? 2000 : 500}`, params);
   return rows.map((r) => ({ ...r, total: toNum(r.total), pagoCorriente: toNum(r.pagoCorriente), abono: toNum(r.abono), porcentaje: toNum(r.porcentaje) }));
 };
 
