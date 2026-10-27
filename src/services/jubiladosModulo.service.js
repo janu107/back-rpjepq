@@ -229,7 +229,9 @@ const historiaCompleta = async (id) => {
       id: r.id || `P${r.periodo}`,
       periodo: r.periodo,
       esDeuda: deuda > 0,
-      tipoPago: pct === null ? "SIN PAGO" : pct >= 100 ? "COMPLETO" : `${pct}%`,
+      // Un mes con deuda que ya se terminó de pagar se muestra COMPLETADO.
+      tipoPago: deuda > 0 && toNum(r.deudaPendiente) <= 0 ? "COMPLETADO"
+        : pct === null ? "SIN PAGO" : pct >= 100 ? "COMPLETO" : `${pct}%`,
       pensionCompleta: toNum(r.pensionCompleta),
       montoGenerado: deuda > 0 ? deuda : toNum(r.pagadoMes),
       montoPagado: deuda > 0 ? toNum(r.deudaPagada) : toNum(r.pagadoMes),

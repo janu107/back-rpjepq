@@ -134,13 +134,9 @@ BEGIN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El porcentaje debe estar entre 1 y 100';
   END IF;
 
-  -- La deuda se rehace desde cero: una planilla GENERADA (sin cerrar) tiene abonos
-  -- aplicados que se perderían.
-  SELECT COUNT(*) INTO v_abiertas FROM RPJ_CAT_PARAMETRO_PLANILLA
-   WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso = 'GENERADA';
-  IF v_abiertas > 0 THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Hay una planilla de jubilados GENERADA: cierrela o reversela antes de la carga historica';
-  END IF;
+  -- Una planilla GENERADA no afecta: la deuda solo cambia al CERRAR. Después de la
+  -- carga conviene volver a generarla para que su vista previa quede al día.
+  SET v_abiertas = 0;
 
   SET p_jubilados = 0; SET p_planillas_creadas = 0; SET p_renglones = 0;
   SET p_deudas = 0; SET p_deudas_eliminadas = 0; SET p_deudas_ajustadas = 0;
@@ -567,53 +563,20 @@ BEGIN
             SET v_liquido = GREATEST(v_pension_prop - v_desc_total, 0);
             SET v_pago    = ROUND(v_liquido * v_porcentaje / 100, 2);
 
-            -- 3. El mes de la planilla se registra como deuda por su líquido -----
-            IF v_liquido > 0 THEN
-                INSERT INTO RPJ_PRC_DEUDA_JUBILADO
-                    (deu_id_jubilado, deu_periodo, deu_id_planilla, deu_monto_original, deu_monto_pagado, deu_monto_pendiente,
-                     deu_estado, deu_tipo_pago, deu_fecha_generacion, deu_observaciones, deu_usuario_creacion)
-                VALUES (v_id_jubilado, v_periodo_pla, p_id_planilla, v_liquido, 0.00, v_liquido,
-                     'PENDIENTE', 'NORMAL', CURDATE(), 'Nomina', p_usuario)
-                ON DUPLICATE KEY UPDATE
-                     deu_id_planilla     = p_id_planilla,
-                     deu_monto_original  = v_liquido,
-                     deu_monto_pendiente = GREATEST(v_liquido - deu_monto_pagado, 0),
-                     deu_estado          = CASE WHEN deu_monto_pagado >= v_liquido THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END;
-            END IF;
-
-            -- 4. El pago se aplica a la deuda más antigua (puede ser el mes actual)
-            SET v_disponible = v_pago; SET v_pago_mes = 0.00; SET v_abono_anterior = 0.00;
+            -- 3. Vista previa del reparto. La deuda NO se toca al generar: el mes se
+            --    registra y el pago se aplica al CERRAR la planilla
+            --    (sp_cuadrar_planilla_pensionados). Aquí solo se indica a qué mes iría.
             SET v_primera_deuda = NULL;
-            loop_deuda: WHILE v_disponible > 0 DO
-                SET v_id_deuda = NULL; SET v_periodo_deuda = NULL; SET v_pendiente_deuda = 0.00;
-                SELECT deu_correlativo, deu_periodo, deu_monto_pendiente
-                  INTO v_id_deuda, v_periodo_deuda, v_pendiente_deuda
-                  FROM RPJ_PRC_DEUDA_JUBILADO
-                 WHERE deu_id_jubilado = v_id_jubilado AND deu_estado IN ('PENDIENTE','PARCIAL') AND deu_monto_pendiente > 0
-                 ORDER BY deu_periodo ASC LIMIT 1;
-                IF v_id_deuda IS NULL THEN LEAVE loop_deuda; END IF;
-
-                SET v_abono = LEAST(v_disponible, v_pendiente_deuda);
-                UPDATE RPJ_PRC_DEUDA_JUBILADO
-                   SET deu_monto_pagado    = deu_monto_pagado + v_abono,
-                       deu_monto_pendiente = deu_monto_pendiente - v_abono,
-                       deu_estado = CASE WHEN deu_monto_pendiente - v_abono <= 0 THEN 'PAGADA' ELSE 'PARCIAL' END,
-                       deu_fecha_saldada = CASE WHEN deu_monto_pendiente - v_abono <= 0 THEN CURDATE() ELSE NULL END
-                 WHERE deu_correlativo = v_id_deuda;
-                INSERT INTO RPJ_PRC_APLICACION_PAGO
-                    (apa_id_planilla, apa_id_jubilado, apa_id_deuda, apa_periodo_deuda, apa_monto_aplicado, apa_fecha_aplicacion, apa_observaciones, apa_usuario_creacion)
-                VALUES (p_id_planilla, v_id_jubilado, v_id_deuda, v_periodo_deuda, v_abono, CURDATE(), CONCAT('Abono al periodo ', v_periodo_deuda), p_usuario);
-
-                IF v_primera_deuda IS NULL THEN SET v_primera_deuda = v_id_deuda; END IF;
-                IF v_periodo_deuda = v_periodo_pla THEN
-                    SET v_pago_mes = v_pago_mes + v_abono;
-                ELSE
-                    SET v_abono_anterior = v_abono_anterior + v_abono;
-                END IF;
-                SET v_disponible = v_disponible - v_abono;
-            END WHILE loop_deuda;
-            -- Sin deuda donde aplicarlo (p. ej. porcentaje 100%): se registra como pago del mes.
-            SET v_pago_mes = v_pago_mes + v_disponible;
+            SELECT deu_correlativo INTO v_primera_deuda
+              FROM RPJ_PRC_DEUDA_JUBILADO
+             WHERE deu_id_jubilado = v_id_jubilado AND deu_estado IN ('PENDIENTE','PARCIAL')
+               AND deu_monto_pendiente > 0 AND deu_periodo < v_periodo_pla
+             ORDER BY deu_periodo ASC LIMIT 1;
+            IF v_primera_deuda IS NULL THEN
+                SET v_pago_mes = v_pago; SET v_abono_anterior = 0.00;
+            ELSE
+                SET v_pago_mes = 0.00; SET v_abono_anterior = v_pago;
+            END IF;
 
             -- 5. Ingreso bruto: descuentos + pago ------------------------------
             INSERT INTO RPJ_PRC_NOMINA_INGRESO
@@ -796,10 +759,11 @@ BEGIN
 END$$
 DELIMITER ;
 
--- 8) Cuadre antes de cerrar ----------------------------------------------------
--- Si se editaron montos a mano, lo que recibe el jubilado (ingreso − descuentos)
--- ya no coincide con lo aplicado a su deuda. Antes de cerrar se recalcula el
--- líquido del mes y se vuelve a aplicar lo pagado a la deuda más antigua.
+-- 8) Cierre: el mes entra a la deuda y el pago se aplica ------------------------
+-- Se ejecuta al CERRAR la planilla de jubilados (antes de sp_cerrar_planilla).
+-- Para cada jubilado: el mes de la planilla queda como deuda por su líquido (con
+-- los montos ya editados) y lo que recibe se abona a los meses pendientes más
+-- antiguos. Si ya se había aplicado (p. ej. se repite), primero se deshace.
 DROP PROCEDURE IF EXISTS sp_cuadrar_planilla_pensionados;
 DELIMITER $$
 CREATE PROCEDURE sp_cuadrar_planilla_pensionados(
@@ -827,27 +791,15 @@ BEGIN
     -- Jubilados descuadrados: lo aplicado a deuda + lo no aplicado ≠ lo que recibe,
     -- o el mes de deuda de esta planilla no vale su líquido.
     DECLARE cur CURSOR FOR
-        SELECT x.id_jub, x.neto, x.liquido
-          FROM (
-            SELECT i.nin_id_jubilado AS id_jub,
-                   SUM(i.nin_valor) - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
-                                                 WHERE d.nde_id_planilla = p_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0) AS neto,
-                   GREATEST(ROUND(MAX(i.nin_valor_teorico) * MAX(i.nin_dias_trabajados) / v_dias_periodo, 2)
-                            - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
-                                         WHERE d.nde_id_planilla = p_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0), 0) AS liquido,
-                   SUM(i.nin_pago_corriente + i.nin_abono_historico) AS registrado
-              FROM RPJ_PRC_NOMINA_INGRESO i
-             WHERE i.nin_id_planilla = p_id_planilla AND i.nin_tipo_manejo = 2 AND i.nin_id_jubilado IS NOT NULL
-             GROUP BY i.nin_id_jubilado
-          ) x
-          LEFT JOIN RPJ_PRC_DEUDA_JUBILADO dm
-                 ON dm.deu_id_jubilado = x.id_jub AND dm.deu_periodo = v_periodo_pla
-         WHERE ABS(x.neto - x.registrado) >= 0.01
-            OR ABS(x.neto - COALESCE((SELECT SUM(a.apa_monto_aplicado) FROM RPJ_PRC_APLICACION_PAGO a
-                                       WHERE a.apa_id_planilla = p_id_planilla AND a.apa_id_jubilado = x.id_jub), 0)) >= 0.01
-               AND EXISTS (SELECT 1 FROM RPJ_PRC_DEUDA_JUBILADO dd WHERE dd.deu_id_jubilado = x.id_jub
-                            AND dd.deu_estado IN ('PENDIENTE','PARCIAL') AND dd.deu_monto_pendiente > 0)
-            OR (x.liquido > 0 AND (dm.deu_correlativo IS NULL OR ABS(dm.deu_monto_original - x.liquido) >= 0.01));
+        SELECT i.nin_id_jubilado AS id_jub,
+               SUM(i.nin_valor) - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
+                                             WHERE d.nde_id_planilla = p_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0) AS neto,
+               GREATEST(ROUND(MAX(i.nin_valor_teorico) * MAX(i.nin_dias_trabajados) / v_dias_periodo, 2)
+                        - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
+                                     WHERE d.nde_id_planilla = p_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0), 0) AS liquido
+          FROM RPJ_PRC_NOMINA_INGRESO i
+         WHERE i.nin_id_planilla = p_id_planilla AND i.nin_tipo_manejo = 2 AND i.nin_id_jubilado IS NOT NULL
+         GROUP BY i.nin_id_jubilado;
 
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
@@ -886,7 +838,7 @@ BEGIN
             INSERT INTO RPJ_PRC_DEUDA_JUBILADO
                 (deu_id_jubilado, deu_periodo, deu_id_planilla, deu_monto_original, deu_monto_pagado, deu_monto_pendiente,
                  deu_estado, deu_tipo_pago, deu_fecha_generacion, deu_observaciones, deu_usuario_creacion)
-            VALUES (v_id_jub, v_periodo_pla, p_id_planilla, v_liquido, 0.00, v_liquido, 'PENDIENTE', 'NORMAL', CURDATE(), 'Nomina (cuadre)', p_usuario)
+            VALUES (v_id_jub, v_periodo_pla, p_id_planilla, v_liquido, 0.00, v_liquido, 'PENDIENTE', 'NORMAL', CURDATE(), 'Nomina', p_usuario)
             ON DUPLICATE KEY UPDATE deu_id_planilla = p_id_planilla, deu_monto_original = v_liquido,
                  deu_monto_pendiente = GREATEST(v_liquido - deu_monto_pagado, 0),
                  deu_estado = CASE WHEN deu_monto_pagado >= v_liquido THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END;
@@ -910,7 +862,7 @@ BEGIN
              WHERE deu_correlativo = v_id_deuda;
             INSERT INTO RPJ_PRC_APLICACION_PAGO
                 (apa_id_planilla, apa_id_jubilado, apa_id_deuda, apa_periodo_deuda, apa_monto_aplicado, apa_fecha_aplicacion, apa_observaciones, apa_usuario_creacion)
-            VALUES (p_id_planilla, v_id_jub, v_id_deuda, v_per_deuda, v_abono, CURDATE(), CONCAT('Abono al periodo ', v_per_deuda, ' (cuadre)'), p_usuario);
+            VALUES (p_id_planilla, v_id_jub, v_id_deuda, v_per_deuda, v_abono, CURDATE(), CONCAT('Abono al periodo ', v_per_deuda), p_usuario);
             IF v_primera IS NULL THEN SET v_primera = v_id_deuda; END IF;
             IF v_per_deuda = v_periodo_pla THEN SET v_pago_mes = v_pago_mes + v_abono; ELSE SET v_anterior = v_anterior + v_abono; END IF;
             SET v_disponible = v_disponible - v_abono;
