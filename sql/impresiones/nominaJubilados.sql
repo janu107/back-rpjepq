@@ -11,7 +11,7 @@
 --   8 ASOCIACION
 -- pension_total   = pensión completa del jubilado (sin el porcentaje).
 -- periodo_aplicado / pct_periodo = mes de deuda al que se abona lo pagado y qué
---   porcentaje de ese mes queda cubierto con este pago (ej. 202301 100%). Si aún
+--   cómo queda ese mes con este pago: 100% completo o 50% aún pendiente. Si aún
 --   no se aplicó (planilla generada, se aplica al cerrar) se calcula como quedará.
 --   Sin meses atrasados: el mes de la planilla y su porcentaje de pago.
 -- Params: [idPlanilla, idPlanilla].
@@ -34,12 +34,11 @@ SELECT
   COALESCE(deu.deu_periodo, pla.ppl_numero)   AS periodo_aplicado,
   CASE
     WHEN deu.deu_correlativo IS NULL THEN pla.ppl_porcentaje_pago
+    -- 100% si con este pago el mes queda completo; 50% si todavía queda pendiente.
     WHEN EXISTS (SELECT 1 FROM RPJ_PRC_APLICACION_PAGO a
                   WHERE a.apa_id_planilla = ing.nin_id_planilla AND a.apa_id_deuda = deu.deu_correlativo)
-      THEN LEAST(100, ROUND(deu.deu_monto_pagado * 100 / NULLIF(deu.deu_monto_original, 0), 0))
-    ELSE LEAST(100, ROUND((deu.deu_monto_pagado
-           + LEAST(COALESCE(ing.pension_mensual, 0) - COALESCE(des.total_descuentos, 0), deu.deu_monto_pendiente))
-           * 100 / NULLIF(deu.deu_monto_original, 0), 0))
+      THEN IF(deu.deu_monto_pendiente <= 0, 100, 50)
+    ELSE IF(COALESCE(ing.pension_mensual, 0) - COALESCE(des.total_descuentos, 0) >= deu.deu_monto_pendiente, 100, 50)
   END                                         AS pct_periodo
 FROM RPJ_MNT_JUBILADO j
 INNER JOIN (

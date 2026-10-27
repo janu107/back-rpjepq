@@ -463,6 +463,11 @@ const generarDeudaHistoricaMasivo = async (periodoDeuda, porcentaje, currentUser
 };
 
 const exportExcel = async (id) => {
+  const planillaBase = await getById(id);
+  // Nómina de jubilados: mismo formato que el PDF de la nómina.
+  if (Number(planillaBase.tipoPlanilla) !== TIPO_AMPARISTAS) {
+    return require("./impresiones.service").excelNominaJubilados(id);
+  }
   const [planilla, detalle] = await Promise.all([getById(id), getDetalle(id)]);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Nomina Pensionados");

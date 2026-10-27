@@ -827,10 +827,110 @@ const getOpciones = async () => {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Nómina de jubilados en Excel: mismo formato que el PDF (encabezado, grupos por
+// tipo de jubilación, mismas columnas, subtotales, total y monto en letras).
+// ---------------------------------------------------------------------------
+const excelNominaJubilados = async (idPlanilla, opciones = {}) => {
+  const ExcelJS = require("exceljs");
+  const { planilla, filas, tipoJubilacion } = await getNominaJubilados(idPlanilla, opciones);
+  if (!filas.length) throw createError("La planilla no tiene renglones de jubilados para exportar", 409);
+
+  const columnas = [
+    { titulo: "COD", campo: "codigo", ancho: 8 },
+    { titulo: "NOMBRE", campo: "nombre", ancho: 38 },
+    { titulo: "PENSION", campo: "tipo_jubilacion", ancho: 22 },
+    { titulo: "FECHA", campo: "fecha_jubilacion", ancho: 12, fecha: true },
+    { titulo: "PENSION TOTAL", campo: "pension_total", ancho: 15, monto: true },
+    { titulo: "P. MENSUAL", campo: "pension_mensual", ancho: 14, monto: true },
+    { titulo: "DESC. ASOC.", campo: "desc_asociacion", ancho: 12, monto: true },
+    { titulo: "DESC. PREST.", campo: "desc_prestamos", ancho: 12, monto: true },
+    { titulo: "D. JUDICIAL", campo: "desc_judicial", ancho: 12, monto: true },
+    { titulo: "D. BANRURAL", campo: "desc_banrural", ancho: 12, monto: true },
+    { titulo: "D. BANTRAB", campo: "desc_bantrab", ancho: 12, monto: true },
+    { titulo: "OTROS DESC.", campo: "desc_otros", ancho: 12, monto: true },
+    { titulo: "PERIODO APLICADO", campo: "periodo", ancho: 17 },
+    { titulo: "LIQ. A RECIBIR", campo: "liquido", ancho: 15, monto: true }
+  ];
+  const n = columnas.length;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Nomina Jubilados", { pageSetup: { paperSize: 5, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  columnas.forEach((c, k) => { ws.getColumn(k + 1).width = c.ancho; });
+
+  const titulo = (texto, tam, negrita = true) => {
+    const r = ws.addRow([texto]);
+    ws.mergeCells(r.number, 1, r.number, n);
+    r.getCell(1).font = { bold: negrita, size: tam };
+    r.getCell(1).alignment = { horizontal: "center" };
+  };
+  titulo("REGIMEN DE PENSIONES Y JUBILACIONES", 13);
+  titulo("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", 11);
+  titulo("NOMINA DE JUBILADOS", 11);
+  titulo(`Planilla ${planilla.numero}  ·  Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}  ·  Pago ${fecha(planilla.fechaPago)}`, 9, false);
+  if (tipoJubilacion) titulo(`Tipo de jubilación: ${tipoJubilacion}`, 9, false);
+  ws.addRow([]);
+
+  const FORMATO = "#,##0.00";
+  const pintar = (r, argb, fuenteBlanca) => r.eachCell({ includeEmpty: true }, (cell, k) => {
+    if (k > n) return;
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+    cell.font = { bold: true, color: { argb: fuenteBlanca ? "FFFFFFFF" : "FF000000" }, size: 9 };
+  });
+  const encabezadoTabla = () => {
+    const r = ws.addRow(columnas.map((c) => c.titulo));
+    pintar(r, "FF1F4E5F", true);
+    r.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    r.height = 28;
+  };
+  const filaTotal = (etiqueta, lista) => {
+    const valores = columnas.map((c) => (c.monto ? lista.reduce((s, f) => s + Number(f[c.campo] || 0), 0) : null));
+    valores[0] = etiqueta;
+    const r = ws.addRow(valores);
+    ws.mergeCells(r.number, 1, r.number, 4);
+    pintar(r, "FFDDE3EA");
+    columnas.forEach((c, k) => { if (c.monto) r.getCell(k + 1).numFmt = FORMATO; });
+  };
+
+  const porTipo = !tipoJubilacion && String(opciones.porTipo ?? "true") !== "false";
+  const grupos = porTipo ? agruparPorTipoJubilacion(filas) : [["", filas]];
+  grupos.forEach(([tipo, lista], idx) => {
+    if (idx > 0) ws.addRow([]);
+    if (porTipo) { const r = ws.addRow([`PENSION: ${tipo}`]); r.getCell(1).font = { bold: true, size: 10 }; }
+    encabezadoTabla();
+    lista.forEach((f, k) => {
+      const r = ws.addRow(columnas.map((c) => {
+        if (c.campo === "periodo") return f.periodo_aplicado ? `${f.periodo_aplicado}  ${Number(f.pct_periodo || 0)}%` : "";
+        if (c.fecha) return f[c.campo] ? fecha(f[c.campo]) : "";
+        return c.monto ? Number(f[c.campo] || 0) : f[c.campo];
+      }));
+      r.font = { size: 9 };
+      columnas.forEach((c, j) => {
+        if (c.monto) r.getCell(j + 1).numFmt = FORMATO;
+        if (c.fecha || c.campo === "periodo") r.getCell(j + 1).alignment = { horizontal: "center" };
+      });
+      if (k % 2 === 1) r.eachCell({ includeEmpty: true }, (cell, j) => { if (j <= n) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F6F8" } }; });
+    });
+    filaTotal(porTipo ? `TOTAL ${tipo}` : "TOTAL DE PENSIONES", lista);
+  });
+  if (porTipo && grupos.length > 1) { ws.addRow([]); filaTotal("TOTAL DE PENSIONES", filas); }
+
+  ws.addRow([]);
+  const total = sumar(filas, "liquido");
+  const letras = ws.addRow([`LA PRESENTE PLANILLA ASCIENDE A LA CANTIDAD DE ${numeroALetras(total)}`]);
+  ws.mergeCells(letras.number, 1, letras.number, n);
+  letras.getCell(1).font = { size: 9 };
+  const lugar = ws.addRow([`PUERTO QUETZAL, ${fechaLarga(planilla.fechaPago)}`]);
+  ws.mergeCells(lugar.number, 1, lugar.number, n);
+  lugar.getCell(1).font = { size: 9 };
+
+  return { buffer: await wb.xlsx.writeBuffer(), filename: `nomina_jubilados_${planilla.numero}.xlsx` };
+};
+
 module.exports = {
   getOpciones,
   getNominaJubilados,
   pdfNominaJubilados,
+  excelNominaJubilados,
   getResumenJubilados,
   pdfResumenJubilados,
   getEstadoAportaciones,
