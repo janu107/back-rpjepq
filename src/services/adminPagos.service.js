@@ -30,7 +30,8 @@ const configs = {
   },
   "tiempo-extra": {
     dir: "tiempo-extra",
-    // FECHA PAGO determina el periodo; inicio/final = primer/último día del mes.
+    // FECHA PAGO (quincena) determina el período trabajado: el MES ANTERIOR completo.
+    // Ej.: pago 15/10/2026 -> período 01/09/2026 al 30/09/2026.
     // tex_tipo_hora: 1=NORMAL, 2=DOBLE.
     required: ["idEmpleado", "fechaPago", "tipoHora", "cantidadHoras"],
     upperFields: ["motivo"],
@@ -41,7 +42,7 @@ const configs = {
       if (Number(data.cantidadHoras) > 744) throw createError("Cantidad de horas fuera de rango");
     },
     toDb: (data) => {
-      const { inicio, final } = mesDesdeFechaPago(data.fechaPago);
+      const { inicio, final } = mesAnteriorAFechaPago(data.fechaPago);
       return [data.idEmpleado, inicio, final, data.cantidadHoras, data.motivo || null, Number(data.tipoHora), data.fechaPago];
     },
     toResponse: (row) => {
@@ -173,12 +174,13 @@ const lastDayOfMonth = (year, month) => {
   return dias[month - 1];
 };
 
-const mesDesdeFechaPago = (fechaPago) => {
-  const periodo = String(fechaPago).slice(0, 7); // YYYY-MM
-  const [year, month] = periodo.split("-").map(Number);
-  const inicio = `${periodo}-01`;
-  const final = `${periodo}-${String(lastDayOfMonth(year, month)).padStart(2, "0")}`;
-  return { inicio, final };
+// Período trabajado = mes anterior al de la fecha de pago (del día 1 al último día).
+const mesAnteriorAFechaPago = (fechaPago) => {
+  let [year, month] = String(fechaPago).slice(0, 7).split("-").map(Number);
+  month -= 1;
+  if (month === 0) { month = 12; year -= 1; }
+  const periodo = `${year}-${String(month).padStart(2, "0")}`;
+  return { inicio: `${periodo}-01`, final: `${periodo}-${String(lastDayOfMonth(year, month)).padStart(2, "0")}` };
 };
 
 // Version IV (Pago de dietas): los montos se calculan desde RPJ_CAT_PARAMETRO_GENERAL.

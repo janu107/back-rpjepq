@@ -13,5 +13,6 @@ INNER JOIN RPJ_MNT_EMPLEADO e ON e.emp_correlativo = t.tex_id_empleado
 LEFT JOIN RPJ_CAT_PARAMETRO_GENERAL pg ON pg.par_id = (SELECT MAX(par_id) FROM RPJ_CAT_PARAMETRO_GENERAL)
 LEFT JOIN RPJ_MNT_SALARIO s ON s.sal_tipo_manejo = e.emp_tipo_manejo
 WHERE e.emp_tipo_manejo = ?
-  AND DATE(t.tex_fecha_hora_inicio) BETWEEN ? AND ?
+  -- Se elige por la fecha de pago (el período trabajado es el mes anterior).
+  AND COALESCE(t.tex_fecha_pago, DATE(t.tex_fecha_hora_inicio)) BETWEEN ? AND ?
 ORDER BY t.tex_correlativo;
