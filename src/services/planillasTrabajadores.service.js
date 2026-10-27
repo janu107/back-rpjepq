@@ -73,6 +73,22 @@ const getById = async (id) => {
   return mapPlanilla(rows[0]);
 };
 
+
+// Solo se crea una planilla nueva cuando todas las anteriores del mismo tipo están
+// CERRADAS: una ABIERTA, GENERADA o REVERSADA hay que terminarla primero.
+const MESES_TXT = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"];
+const assertTodasCerradas = async (tipoPlanilla, nombre) => {
+  const [[pend]] = await pool.execute(
+    `SELECT ppl_numero AS numero, ppl_estado_proceso AS estado FROM RPJ_CAT_PARAMETRO_PLANILLA
+      WHERE ppl_tipo_planilla = ? AND ppl_estado_proceso <> 'CERRADA'
+      ORDER BY ppl_numero LIMIT 1`, [tipoPlanilla]);
+  if (pend) {
+    const n = String(pend.numero);
+    const periodo = n.length === 6 ? `${MESES_TXT[Number(n.slice(4)) - 1]} ${n.slice(0, 4)}` : n;
+    throw createError(`NO SE PUEDE CREAR OTRA PLANILLA DE ${nombre}: LA DE ${periodo} ESTÁ ${pend.estado}. CIÉRRELA PRIMERO.`, 409);
+  }
+};
+
 const create = async (payload, currentUser) => {
   validate(payload);
   // Evitar planillas duplicadas por tipo + numero (Version VII)
@@ -81,6 +97,7 @@ const create = async (payload, currentUser) => {
     [TIPO_PLANILLA_EMPLEADOS, payload.numero]
   );
   if (dup.length) throw createError("YA EXISTE UNA PLANILLA DE EMPLEADOS CON ESE NUMERO", 409);
+  await assertTodasCerradas(TIPO_PLANILLA_EMPLEADOS, "EMPLEADOS");
   const usuario = currentUser?.usuario || "sistema";
   const params = [
     TIPO_PLANILLA_EMPLEADOS, payload.numero,
