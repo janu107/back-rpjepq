@@ -42,4 +42,4 @@ LEFT JOIN (
 -- Tipo 2 = nómina de pensionados, tipo 4 = nómina de amparistas.
 -- Ambas se administran desde la misma pantalla del módulo de Nóminas.
 WHERE p.ppl_tipo_planilla IN (2, 4)
-ORDER BY p.ppl_correlativo DESC;
+ORDER BY p.ppl_numero DESC, p.ppl_correlativo DESC;
