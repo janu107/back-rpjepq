@@ -43,9 +43,9 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dJ = await deudas(1);
   ok(dJ.length === n && dJ.every((d) => eq(d.o, 5985)), `Juan: ${n} meses adeudados de 5,985 desde ${PERIODO_DEUDA}`);
   ok(dJ[0].p === PERIODO_DEUDA, "Juan: la deuda empieza en el período indicado");
-  ok(dJ.every((d) => d.e === "PARCIAL" && eq(d.pend, 2992.50)),
-    "Juan: desde enero 2023 cada mes se pagó la mitad y la otra mitad (2,992.50) queda como deuda");
-  ok(eq(await pendiente(1), r2(n * 5985 / 2)), `Juan: debe la mitad de todo lo devengado = ${r2(n * 5985 / 2)}`);
+  ok(dJ.every((d) => d.e === "PENDIENTE" && eq(d.pg, 0) && eq(d.pend, 5985)),
+    "Juan: desde enero 2023 cada mes se debe completo (5,985) y sin abonos");
+  ok(eq(await pendiente(1), r2(n * 5985)), `Juan: debe todo lo devengado desde enero 2023 = ${r2(n * 5985)}`);
   const [febJuan] = await q("SELECT i.nin_valor v, i.nin_porcentaje_aplicado pct FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo=i.nin_id_planilla WHERE p.ppl_numero=202212 AND i.nin_id_jubilado=1");
   ok(febJuan && eq(febJuan.pct, 100) && eq(febJuan.v, 8000), "Juan: diciembre 2022 se pagó completo (planilla histórica al 100%)");
 
@@ -53,7 +53,7 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   const dA = await deudas(2);
   ok(dA[0].p === 202506 && eq(dA[0].o, 3185), "Ana (ingresó 2025): primer mes junio 2025 proporcional = 3,200 − 15 = 3,185");
   ok(dA.length === mesesEntre(202506, periodoFin), "Ana: deuda solo desde su fecha de ingreso");
-  ok(eq(await pendiente(2), r2(dA.reduce((s, d) => s + Number(d.o), 0) / 2)), "Ana: debe la mitad de lo devengado desde que ingresó");
+  ok(eq(await pendiente(2), r2(dA.reduce((s, d) => s + Number(d.o), 0))), "Ana: debe todo lo devengado desde que ingresó");
 
   // Beto: préstamo BI desde 2024 -> 2023 vale 4,985 y 2024 en adelante 4,485.
   const dB = await deudas(3);

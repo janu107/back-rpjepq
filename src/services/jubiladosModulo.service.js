@@ -263,11 +263,8 @@ const historiaCompleta = async (id) => {
         : pct === null ? "SIN PAGO" : pct >= 100 ? "COMPLETO" : `${pct}%`,
       pensionCompleta: toNum(r.pensionCompleta),
       montoGenerado: deuda > 0 ? deuda : toNum(r.pagadoMes),
-      // Abonado = lo pagado a la DEUDA de ese mes. En meses de la carga histórica lo
-      // recibido ese mes (su 50%) es su pago normal y no cuenta como abono.
-      montoPagado: deuda > 0
-        ? Math.round(Math.max(toNum(r.deudaPagada) - (r.deudaPlanilla ? 0 : Math.min(toNum(r.pagadoMes), deuda)), 0) * 100) / 100
-        : 0,
+      // Abonado = lo pagado a la DEUDA de ese mes por las nóminas cerradas.
+      montoPagado: deuda > 0 ? toNum(r.deudaPagada) : 0,
       // Meses pagados completos (antes del 50%) no tienen deuda: sin abono.
       sinDeuda: !(deuda > 0),
       pagadoCon: r.pagadoCon ? String(r.pagadoCon).split(",") : [],
@@ -276,7 +273,7 @@ const historiaCompleta = async (id) => {
       // Estado visible según lo abonado a la DEUDA (no el pago normal del 50%).
       estado: !r.deudaEstado ? "PAGADO"
         : toNum(r.deudaPendiente) <= 0 ? "PAGADA"
-        : (Math.max(toNum(r.deudaPagada) - (r.deudaPlanilla ? 0 : Math.min(toNum(r.pagadoMes), deuda)), 0) > 0 ? "PARCIAL" : "PENDIENTE"),
+        : (toNum(r.deudaPagada) > 0 ? "PARCIAL" : "PENDIENTE"),
       fechaGeneracion: r.fechaPago
     };
   });
