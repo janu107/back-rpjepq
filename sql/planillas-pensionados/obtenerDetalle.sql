@@ -1,5 +1,6 @@
 SELECT
   j.jub_correlativo                                      AS id_jubilado,
+  j.jub_id                                               AS codigo,
   j.jub_dpi                                              AS dpi,
   CONCAT(j.jub_nombres, ' ', j.jub_apellidos)           AS nombre_completo,
   j.jub_fecha_jubilacion                                AS fecha_jubilacion,

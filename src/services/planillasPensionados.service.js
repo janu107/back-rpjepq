@@ -54,6 +54,7 @@ const mapPlanilla = (row) => ({
 
 const mapDetalle = (row) => ({
   idJubilado: row.id_jubilado,
+  codigo: row.codigo,
   dpi: row.dpi,
   nombreCompleto: row.nombre_completo,
   fechaJubilacion: row.fecha_jubilacion,
