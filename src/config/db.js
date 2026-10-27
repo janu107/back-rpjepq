@@ -9,7 +9,14 @@ const pool = mysql.createPool({
   port: Number(process.env.DB_PORT || 3306),
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  // Evita conexiones "muertas" (ETIMEDOUT) cuando la red se corta un rato, p. ej.
+  // al suspender la computadora o por inactividad: se mantienen vivas y las que
+  // llevan mucho tiempo sin usarse se cierran y se abren de nuevo.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  maxIdle: 5,
+  idleTimeout: 60000
 });
 
 const testConnection = async () => {
