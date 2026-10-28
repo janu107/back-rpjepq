@@ -383,65 +383,129 @@ const getEstadoAportaciones = async (idAportacion) => {
   return { empleado: cab[0], movimientos: mov };
 };
 
+// formato "anual" (por defecto): matriz año x mes, cabe en una hoja.
+// formato "detalle": cada aporte, en 3 columnas por hoja.
 const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
   const { empleado, movimientos } = await getEstadoAportaciones(idAportacion);
   const total = sumar(movimientos, "monto");
+  const detalle = String(opciones.formato || "").toLowerCase() === "detalle";
 
-  const doc = pdf.nuevoDoc(pdf.CARTA);
-  const cabecera = (d) => pdf.encabezado(d, { titulo: "ESTADO DE CUENTA DE APORTACIONES" });
+  const doc = pdf.nuevoDoc(detalle ? pdf.CARTA : { size: "LETTER", layout: "landscape", margin: 36 });
+  const cabecera = (d) => pdf.encabezado(d, {
+    titulo: "ESTADO DE CUENTA DE APORTACIONES",
+    subtitulo: detalle ? "Detalle de aportes" : "Resumen por año y mes"
+  });
   cabecera(doc);
 
-  // Ficha del empleado: código, nombre, área, total y cantidad de aportes.
-  // El nombre va en su propio renglón a todo el ancho: en dos columnas, un
-  // nombre completo se desbordaba encima de la fila siguiente.
+  // Ficha del empleado.
   const ancho = pdf.anchoUtil(doc);
   const media = ancho / 2;
   const x0 = doc.page.margins.left;
-
   const par = (etiqueta, valor, x, y, anchoTotal) => {
     const anchoEtiqueta = Math.min(110, anchoTotal * 0.45);
-    doc.font("Helvetica-Bold").fontSize(8).text(etiqueta, x, y, { width: anchoEtiqueta, lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#000000").text(etiqueta, x, y, { width: anchoEtiqueta, lineBreak: false });
     doc.font("Helvetica").fontSize(8).text(String(valor ?? "—"), x + anchoEtiqueta + 4, y,
       { width: anchoTotal - anchoEtiqueta - 4, lineBreak: false, ellipsis: true });
   };
-
+  const primero = movimientos[0]?.fecha_pago; const ultimo = movimientos[movimientos.length - 1]?.fecha_pago;
+  // El nombre va solo en su renglón: en media columna un nombre largo se montaba.
   let y = doc.y;
   par("NOMBRE:", empleado.nombre || "—", x0, y, ancho);
   y += 13;
   par("CODIGO:", empleado.codigo ?? "—", x0, y, media - 8);
-  par("TOTAL APORTADO:", `Q ${q(total)}`, x0 + media, y, media);
+  par("ESTADO:", empleado.estado || "—", x0 + media, y, media);
   y += 13;
   par("AREA / GERENCIA:", empleado.area || "—", x0, y, media - 8);
+  par("PERIODO:", primero ? `${fecha(primero)} al ${fecha(ultimo)}` : "—", x0 + media, y, media);
+  y += 13;
+  par("TOTAL APORTADO:", `Q ${q(total)}`, x0, y, media - 8);
   par("CANTIDAD DE APORTES:", String(movimientos.length), x0 + media, y, media);
   y += 13;
-  par("ESTADO:", empleado.estado || "—", x0, y, media - 8);
-  doc.y = y + 20;
+  doc.y = y + 12;
   doc.x = x0;
-
-  // La tabla (3 columnas) va centrada en la hoja con un ancho fijo, en vez de
-  // estirarse a todo el ancho con mucho espacio vacío entre columnas.
-  const anchoTabla = 330;
-  const margenExtra = Math.max(0, (pdf.anchoUtil(doc) - anchoTabla) / 2);
-  const anchos = [anchoTabla * 0.15, anchoTabla * 0.45, anchoTabla * 0.40];
-  const columnas = [
-    { titulo: "No.", campo: "no", align: "right", ancho: anchos[0] },
-    { titulo: "FECHA DE PAGO", campo: "fecha_pago", align: "center", ancho: anchos[1], valor: (f) => fecha(f.fecha_pago) },
-    { titulo: "MONTO", campo: "monto", align: "right", ancho: anchos[2], valor: (f) => `Q ${q(f.monto)}` }
-  ];
 
   if (!movimientos.length) {
     doc.font("Helvetica-Oblique").fontSize(8).text("El empleado no tiene aportaciones registradas.");
-  } else {
-    pdf.conMargenLateral(doc, margenExtra, () => {
-      pdf.dibujarTabla(doc, columnas, movimientos.map((m, i) => ({ ...m, no: i + 1 })),
-        { fuente: 7.5, alturaFila: 13, reservaInferior: 40, alRepetirEncabezado: cabecera });
-      pdf.filaTotales(doc, columnas, { monto: `Q ${q(total)}` }, `TOTAL (${movimientos.length} aportes)`, 2);
+  } else if (!detalle) {
+    // ---- Matriz año x mes ----
+    const MES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+    const porAnio = new Map();
+    movimientos.forEach((m) => {
+      const d = new Date(m.fecha_pago);
+      const anio = d.getFullYear(); const mes = d.getMonth();
+      if (!porAnio.has(anio)) porAnio.set(anio, { anio, meses: Array.from({ length: 12 }, () => ({ v: 0, n: 0 })), total: 0, n: 0 });
+      const r = porAnio.get(anio);
+      r.meses[mes].v += Number(m.monto || 0); r.meses[mes].n += 1;
+      r.total += Number(m.monto || 0); r.n += 1;
     });
+    const filas = [...porAnio.values()].sort((p1, p2) => p1.anio - p2.anio);
+    let hayVarios = false;
+    const celda = (c) => {
+      if (!c.n) return "";
+      if (c.n > 1) hayVarios = true;
+      return `${q(c.v)}${c.n > 1 ? "*" : ""}`;
+    };
+    const anchos = pdf.repartirAnchos(doc, [5, ...Array(12).fill(6.4), 5.2, 8]);
+    const columnas = [
+      { titulo: "AÑO", campo: "anio", align: "center", ancho: anchos[0] },
+      ...MES.map((t, i) => ({ titulo: t, campo: `m${i}`, align: "right", ancho: anchos[i + 1], valor: (f) => celda(f.meses[i]) })),
+      { titulo: "APORTES", campo: "n", align: "center", ancho: anchos[13] },
+      { titulo: "TOTAL AÑO", campo: "total", align: "right", ancho: anchos[14], valor: (f) => q(f.total) }
+    ];
+    // Filas más bajas cuando hay muchos años, para que quepa en una hoja.
+    const espacio = doc.page.height - doc.page.margins.bottom - 30 - doc.y - 15 - 16 - 16;
+    const alturaFila = Math.max(9.5, Math.min(13, espacio / filas.length));
+    pdf.dibujarTabla(doc, columnas, filas, { fuente: alturaFila < 11 ? 6.6 : 7, alturaFila, altoEncabezado: 15, reservaInferior: 30, alRepetirEncabezado: cabecera });
+    pdf.filaTotales(doc, columnas, { n: String(movimientos.length), total: q(total) }, "TOTAL GENERAL", 13, { fuente: 7.5 });
+    if (hayVarios) {
+      doc.moveDown(0.6);
+      doc.font("Helvetica-Oblique").fontSize(7).fillColor("#555555")
+        .text("* Mes con más de un aporte: se muestra la suma del mes. El detalle de cada aporte está en el formato \"Detalle\".", x0);
+      doc.fillColor("#000000");
+    }
+  } else {
+    // ---- Detalle en 3 columnas (se llena de arriba abajo, columna por columna) ----
+    const COLS = 3; const sep = 14;
+    const anchoBloque = (ancho - sep * (COLS - 1)) / COLS;
+    const aNo = anchoBloque * 0.18; const aFecha = anchoBloque * 0.40; const aMonto = anchoBloque - aNo - aFecha;
+    const alto = 12.5; const altoEnc = 15;
+    const items = movimientos.map((m, i) => ({ no: i + 1, fecha: fecha(m.fecha_pago), monto: q(m.monto) }));
+    let k = 0;
+    while (k < items.length) {
+      const yIni = doc.y;
+      const disponibles = Math.floor((doc.page.height - doc.page.margins.bottom - 40 - yIni - altoEnc) / alto);
+      for (let c = 0; c < COLS && k < items.length; c += 1) {
+        const xb = x0 + c * (anchoBloque + sep);
+        doc.save().rect(xb, yIni, anchoBloque, altoEnc).fill("#1F4E5F").restore();
+        doc.font("Helvetica-Bold").fontSize(7).fillColor("#FFFFFF");
+        doc.text("No.", xb + 2, yIni + 4, { width: aNo - 4, align: "right" });
+        doc.text("FECHA", xb + aNo, yIni + 4, { width: aFecha, align: "center" });
+        doc.text("MONTO", xb + aNo + aFecha, yIni + 4, { width: aMonto - 4, align: "right" });
+        for (let r = 0; r < disponibles && k < items.length; r += 1, k += 1) {
+          const yy = yIni + altoEnc + r * alto;
+          if (r % 2 === 1) doc.save().rect(xb, yy, anchoBloque, alto).fill("#F3F5F8").restore();
+          const it = items[k];
+          doc.font("Helvetica").fontSize(7.5).fillColor("#000000");
+          doc.text(String(it.no), xb + 2, yy + 3, { width: aNo - 4, align: "right" });
+          doc.text(it.fecha, xb + aNo, yy + 3, { width: aFecha, align: "center" });
+          doc.text(`Q ${it.monto}`, xb + aNo + aFecha, yy + 3, { width: aMonto - 4, align: "right" });
+        }
+      }
+      doc.y = yIni + altoEnc + Math.min(disponibles, items.length) * alto + 6;
+      if (k < items.length) { doc.addPage(); cabecera(doc); }
+    }
+    doc.x = x0;
+    const yT = doc.y + 4;
+    doc.save().rect(x0, yT, ancho, 16).fill("#DDE3EA").restore();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#000000")
+      .text(`TOTAL (${movimientos.length} aportes)`, x0 + 4, yT + 4, { width: ancho / 2 })
+      .text(`Q ${q(total)}`, x0 + ancho / 2, yT + 4, { width: ancho / 2 - 4, align: "right" });
+    doc.y = yT + 20;
   }
 
   pdf.pieDePagina(doc, user?.usuario);
-  logger.info("Impresión de estado de cuenta de aportaciones", { idAportacion, movimientos: movimientos.length, usuario: user?.usuario });
-  return { buffer: await pdf.aBuffer(doc), filename: `aportaciones_${empleado.codigo || idAportacion}.pdf` };
+  logger.info("Impresión de estado de cuenta de aportaciones", { idAportacion, movimientos: movimientos.length, formato: detalle ? "detalle" : "anual", usuario: user?.usuario });
+  return { buffer: await pdf.aBuffer(doc), filename: `aportaciones_${empleado.codigo || idAportacion}${detalle ? "_detalle" : ""}.pdf` };
 };
 
 // ---------------------------------------------------------------------------
