@@ -385,6 +385,116 @@ const getEstadoAportaciones = async (idAportacion) => {
 
 // formato "anual" (por defecto): matriz año x mes, cabe en una hoja.
 // formato "detalle": cada aporte, en 3 columnas por hoja.
+// Agrupa los aportes por año (en orden).
+const agruparPorAnio = (movimientos) => {
+  const mapa = new Map();
+  movimientos.forEach((m) => {
+    const anio = new Date(m.fecha_pago).getFullYear();
+    if (!mapa.has(anio)) mapa.set(anio, { anio, items: [], total: 0 });
+    const g = mapa.get(anio);
+    g.items.push(m); g.total = Math.round((g.total + Number(m.monto || 0)) * 100) / 100;
+  });
+  return [...mapa.values()].sort((x, y) => x.anio - y.anio);
+};
+
+// Excel del estado de cuenta de aportaciones: detalle agrupado por año y resumen año x mes.
+const excelEstadoAportaciones = async (idAportacion) => {
+  const ExcelJS = require("exceljs");
+  const { empleado, movimientos } = await getEstadoAportaciones(idAportacion);
+  if (!movimientos.length) throw createError("El empleado no tiene aportaciones registradas", 409);
+  const total = Math.round(sumar(movimientos, "monto") * 100) / 100;
+  const grupos = agruparPorAnio(movimientos);
+  const MES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+  const MONEDA = '"Q "#,##0.00';
+  const OSCURO = "FF1F4E5F"; const CLARO = "FFDDE3EA";
+  const borde = { top: { style: "thin", color: { argb: "FFC9D3DD" } }, bottom: { style: "thin", color: { argb: "FFC9D3DD" } } };
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "RPJEPQ";
+
+  const encabezado = (ws, ncols, subtitulo) => {
+    const t = (texto, tam, negrita = true) => {
+      const r = ws.addRow([texto]);
+      ws.mergeCells(r.number, 1, r.number, ncols);
+      r.getCell(1).font = { bold: negrita, size: tam };
+      r.getCell(1).alignment = { horizontal: "center" };
+    };
+    t("REGIMEN DE PENSIONES Y JUBILACIONES", 13);
+    t("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", 11);
+    t("ESTADO DE CUENTA DE APORTACIONES", 11);
+    t(subtitulo, 9, false);
+    ws.addRow([]);
+    const ficha = [
+      ["NOMBRE:", empleado.nombre || ""], ["CÓDIGO:", empleado.codigo ?? ""], ["ÁREA / GERENCIA:", empleado.area || ""],
+      ["ESTADO:", empleado.estado || ""], ["PERÍODO:", `${fecha(movimientos[0].fecha_pago)} al ${fecha(movimientos[movimientos.length - 1].fecha_pago)}`],
+      ["CANTIDAD DE APORTES:", movimientos.length], ["TOTAL APORTADO:", total]
+    ];
+    ficha.forEach(([e, v]) => {
+      const r = ws.addRow([e, v]);
+      r.getCell(1).font = { bold: true };
+      if (e === "TOTAL APORTADO:") { r.getCell(2).numFmt = MONEDA; r.getCell(2).font = { bold: true }; }
+      r.getCell(2).alignment = { horizontal: "left" };
+    });
+    ws.addRow([]);
+  };
+
+  // --- Hoja 1: detalle por año ---
+  const ws = wb.addWorksheet("Detalle por año", { pageSetup: { paperSize: 1, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  [22, 16, 16, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  encabezado(ws, 4, "Detalle de aportes por año");
+  let n = 0;
+  grupos.forEach((g) => {
+    const banda = ws.addRow([`AÑO ${g.anio}`, "", "", `${g.items.length} aporte(s)`]);
+    banda.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: OSCURO } }; c.font = { bold: true, color: { argb: "FFFFFFFF" } }; });
+    banda.getCell(4).alignment = { horizontal: "right" };
+    const enc = ws.addRow(["No.", "FECHA DE PAGO", "MES", "MONTO"]);
+    enc.eachCell((c) => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F4F7" } }; c.border = borde; });
+    enc.getCell(4).alignment = { horizontal: "right" };
+    g.items.forEach((m) => {
+      n += 1;
+      const d = new Date(m.fecha_pago);
+      const r = ws.addRow([n, new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())), MES[d.getMonth()], Number(m.monto || 0)]);
+      r.getCell(1).alignment = { horizontal: "left" };
+      r.getCell(2).numFmt = "dd/mm/yyyy"; r.getCell(2).alignment = { horizontal: "center" };
+      r.getCell(4).numFmt = MONEDA;
+    });
+    const sub = ws.addRow([`TOTAL ${g.anio}`, "", "", g.total]);
+    sub.eachCell((c) => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CLARO } }; });
+    sub.getCell(4).numFmt = MONEDA;
+    ws.addRow([]);
+  });
+  const tot = ws.addRow([`TOTAL GENERAL (${movimientos.length} aportes)`, "", "", total]);
+  tot.eachCell((c) => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: OSCURO } }; });
+  tot.getCell(4).numFmt = MONEDA;
+
+  // --- Hoja 2: resumen año x mes ---
+  const wr = wb.addWorksheet("Resumen anual", { pageSetup: { paperSize: 1, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  const MES3 = MES.map((m) => m.slice(0, 3));
+  const ncols = 15;
+  wr.getColumn(1).width = 8;
+  for (let i = 2; i <= 13; i += 1) wr.getColumn(i).width = 11;
+  wr.getColumn(14).width = 10; wr.getColumn(15).width = 14;
+  encabezado(wr, ncols, "Resumen por año y mes");
+  const encR = wr.addRow(["AÑO", ...MES3, "APORTES", "TOTAL AÑO"]);
+  encR.eachCell((c) => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: OSCURO } }; c.alignment = { horizontal: "center" }; });
+  grupos.forEach((g) => {
+    const meses = Array(12).fill(null);
+    g.items.forEach((m) => { const k = new Date(m.fecha_pago).getMonth(); meses[k] = Math.round(((meses[k] || 0) + Number(m.monto || 0)) * 100) / 100; });
+    const r = wr.addRow([g.anio, ...meses, g.items.length, g.total]);
+    r.getCell(1).alignment = { horizontal: "center" };
+    for (let i = 2; i <= 13; i += 1) r.getCell(i).numFmt = "#,##0.00";
+    r.getCell(14).alignment = { horizontal: "center" };
+    r.getCell(15).numFmt = MONEDA; r.getCell(15).font = { bold: true };
+  });
+  const totR = wr.addRow(["TOTAL", ...Array(12).fill(null), movimientos.length, total]);
+  totR.eachCell((c) => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CLARO } }; });
+  totR.getCell(14).alignment = { horizontal: "center" };
+  totR.getCell(15).numFmt = MONEDA;
+
+  const buffer = await wb.xlsx.writeBuffer();
+  return { buffer: Buffer.from(buffer), filename: `aportaciones_${empleado.codigo || idAportacion}.xlsx` };
+};
+
 const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
   const { empleado, movimientos } = await getEstadoAportaciones(idAportacion);
   const total = sumar(movimientos, "monto");
@@ -464,42 +574,79 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
       doc.fillColor("#000000");
     }
   } else {
-    // ---- Detalle en 3 columnas (se llena de arriba abajo, columna por columna) ----
+    // ---- Detalle agrupado por año, en 3 columnas (bloques de arriba abajo) ----
     const COLS = 3; const sep = 14;
-    const anchoBloque = (ancho - sep * (COLS - 1)) / COLS;
-    const aNo = anchoBloque * 0.18; const aFecha = anchoBloque * 0.40; const aMonto = anchoBloque - aNo - aFecha;
-    const alto = 12.5; const altoEnc = 15;
-    const items = movimientos.map((m, i) => ({ no: i + 1, fecha: fecha(m.fecha_pago), monto: q(m.monto) }));
-    let k = 0;
-    while (k < items.length) {
-      const yIni = doc.y;
-      const disponibles = Math.floor((doc.page.height - doc.page.margins.bottom - 40 - yIni - altoEnc) / alto);
-      for (let c = 0; c < COLS && k < items.length; c += 1) {
-        const xb = x0 + c * (anchoBloque + sep);
-        doc.save().rect(xb, yIni, anchoBloque, altoEnc).fill("#1F4E5F").restore();
-        doc.font("Helvetica-Bold").fontSize(7).fillColor("#FFFFFF");
-        doc.text("No.", xb + 2, yIni + 4, { width: aNo - 4, align: "right" });
-        doc.text("FECHA", xb + aNo, yIni + 4, { width: aFecha, align: "center" });
-        doc.text("MONTO", xb + aNo + aFecha, yIni + 4, { width: aMonto - 4, align: "right" });
-        for (let r = 0; r < disponibles && k < items.length; r += 1, k += 1) {
-          const yy = yIni + altoEnc + r * alto;
-          if (r % 2 === 1) doc.save().rect(xb, yy, anchoBloque, alto).fill("#F3F5F8").restore();
-          const it = items[k];
-          doc.font("Helvetica").fontSize(7.5).fillColor("#000000");
-          doc.text(String(it.no), xb + 2, yy + 3, { width: aNo - 4, align: "right" });
-          doc.text(it.fecha, xb + aNo, yy + 3, { width: aFecha, align: "center" });
-          doc.text(`Q ${it.monto}`, xb + aNo + aFecha, yy + 3, { width: aMonto - 4, align: "right" });
+    const anchoCol = (ancho - sep * (COLS - 1)) / COLS;
+    const aNo = anchoCol * 0.16; const aFecha = anchoCol * 0.42; const aMonto = anchoCol - aNo - aFecha;
+    const alto = 12; const altoBanda = 15; const altoSub = 13;
+    const grupos = agruparPorAnio(movimientos);
+    let numero = 0;
+    const filas = [];
+    grupos.forEach((g) => {
+      filas.push({ tipo: "banda", g });
+      g.items.forEach((m) => { numero += 1; filas.push({ tipo: "item", no: numero, m, g }); });
+      filas.push({ tipo: "sub", g });
+    });
+
+    const yTope = () => doc.y;
+    let col = 0; let yIni = yTope(); let y2 = yIni;
+    const limite = () => doc.page.height - doc.page.margins.bottom - 34;
+    const xCol = () => x0 + col * (anchoCol + sep);
+    const nuevaColumna = () => {
+      col += 1;
+      if (col >= COLS) { doc.addPage(); cabecera(doc); col = 0; yIni = doc.y; }
+      y2 = yIni;
+    };
+    const altoDe = (f) => (f.tipo === "banda" ? altoBanda : f.tipo === "sub" ? altoSub : alto);
+
+    filas.forEach((f, idx) => {
+      // Una banda de año no queda sola al pie: necesita al menos 2 renglones debajo.
+      const necesita = f.tipo === "banda" ? altoBanda + alto * 2 : altoDe(f);
+      if (y2 + necesita > limite()) {
+        nuevaColumna();
+        if (f.tipo !== "banda") {
+          // Continúa un año en la columna nueva: se repite la banda.
+          const xb = xCol();
+          doc.save().rect(xb, y2, anchoCol, altoBanda).fill("#1F4E5F").restore();
+          doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#FFFFFF").text(`${f.g.anio} (cont.)`, xb + 4, y2 + 4, { width: anchoCol - 8 });
+          y2 += altoBanda;
         }
       }
-      doc.y = yIni + altoEnc + Math.min(disponibles, items.length) * alto + 6;
-      if (k < items.length) { doc.addPage(); cabecera(doc); }
-    }
+      const xb = xCol();
+      if (f.tipo === "banda") {
+        doc.save().rect(xb, y2, anchoCol, altoBanda).fill("#1F4E5F").restore();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF")
+          .text(`${f.g.anio}`, xb + 4, y2 + 4, { width: anchoCol / 2 })
+          .font("Helvetica").fontSize(7)
+          .text(`${f.g.items.length} aporte(s)`, xb + anchoCol / 2, y2 + 4.5, { width: anchoCol / 2 - 4, align: "right" });
+        y2 += altoBanda;
+      } else if (f.tipo === "item") {
+        const par = (idx % 2) === 0;
+        if (par) doc.save().rect(xb, y2, anchoCol, alto).fill("#F3F5F8").restore();
+        doc.font("Helvetica").fontSize(7.5).fillColor("#000000");
+        doc.text(String(f.no), xb + 2, y2 + 3, { width: aNo - 4, align: "right" });
+        doc.text(fecha(f.m.fecha_pago), xb + aNo, y2 + 3, { width: aFecha, align: "center" });
+        doc.text(`Q ${q(f.m.monto)}`, xb + aNo + aFecha, y2 + 3, { width: aMonto - 4, align: "right" });
+        y2 += alto;
+      } else {
+        doc.save().rect(xb, y2, anchoCol, altoSub).fill("#DDE3EA").restore();
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#000000")
+          .text(`TOTAL ${f.g.anio}`, xb + 4, y2 + 3.5, { width: anchoCol / 2 })
+          .text(`Q ${q(f.g.total)}`, xb + anchoCol / 2, y2 + 3.5, { width: anchoCol / 2 - 4, align: "right" });
+        y2 += altoSub + 6;
+      }
+    });
+
     doc.x = x0;
-    const yT = doc.y + 4;
-    doc.save().rect(x0, yT, ancho, 16).fill("#DDE3EA").restore();
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#000000")
-      .text(`TOTAL (${movimientos.length} aportes)`, x0 + 4, yT + 4, { width: ancho / 2 })
-      .text(`Q ${q(total)}`, x0 + ancho / 2, yT + 4, { width: ancho / 2 - 4, align: "right" });
+    let yT = (col === 0 ? y2 : Math.max(y2, yIni)) + 4;
+    // El total general va debajo de la columna más baja de la hoja actual.
+    yT = Math.max(yT, y2 + 4);
+    if (yT + 18 > doc.page.height - doc.page.margins.bottom - 20) { doc.addPage(); cabecera(doc); yT = doc.y; }
+    doc.save().rect(x0, yT, ancho, 16).fill("#1F4E5F").restore();
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#FFFFFF")
+      .text(`TOTAL GENERAL (${movimientos.length} aportes)`, x0 + 6, yT + 4, { width: ancho / 2 })
+      .text(`Q ${q(total)}`, x0 + ancho / 2, yT + 4, { width: ancho / 2 - 6, align: "right" });
+    doc.fillColor("#000000");
     doc.y = yT + 20;
   }
 
@@ -1005,6 +1152,7 @@ module.exports = {
   pdfResumenJubilados,
   getEstadoAportaciones,
   pdfEstadoAportaciones,
+  excelEstadoAportaciones,
   getNominaSueldos,
   pdfNominaSueldos,
   getNominaTiempoExtra,

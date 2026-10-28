@@ -34,6 +34,10 @@ router.get("/prestamo/:idPrestamo/estado-cuenta/pdf",
   auditAction("IMPRESIONES", "ESTADO_CUENTA_PRESTAMO_PDF", (req) => `Imprimir estado de cuenta del préstamo ${req.params.idPrestamo}`),
   controller.pdfEstadoCuenta);
 
+router.get("/aportaciones/:idAportacion/estado-cuenta/excel",
+  auditAction("IMPRESIONES", "ESTADO_APORTACIONES_EXCEL", (req) => `Exportar estado de cuenta de aportaciones ${req.params.idAportacion}`),
+  controller.excelEstadoAportaciones);
+
 router.get("/aportaciones/:idAportacion/estado-cuenta/pdf",
   auditAction("IMPRESIONES", "ESTADO_APORTACIONES_PDF", (req) => `Imprimir estado de cuenta de aportaciones ${req.params.idAportacion}`),
   controller.pdfEstadoAportaciones);

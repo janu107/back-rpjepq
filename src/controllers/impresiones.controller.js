@@ -25,6 +25,14 @@ const pdfNominaSueldos = async (req, res, next) => { try { return enviarPdf(res,
 const pdfNominaTiempoExtra = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaTiempoExtra(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
 const pdfEstadoCuenta = async (req, res, next) => { try { return enviarPdf(res, await service.pdfEstadoCuentaPrestamo(req.params.idPrestamo, req.query, req.user)); } catch (e) { next(e); } };
 const pdfResumen = async (req, res, next) => { try { return enviarPdf(res, await service.pdfResumen(req.query, req.user)); } catch (e) { next(e); } };
+const excelEstadoAportaciones = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.excelEstadoAportaciones(req.params.idAportacion);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (e) { next(e); }
+};
 const pdfEstadoAportaciones = async (req, res, next) => { try { return enviarPdf(res, await service.pdfEstadoAportaciones(req.params.idAportacion, req.query, req.user)); } catch (e) { next(e); } };
 const pdfNominaJubilados = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaJubilados(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
 const pdfResumenJubilados = async (req, res, next) => { try { return enviarPdf(res, await service.pdfResumenJubilados(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
@@ -35,5 +43,5 @@ module.exports = {
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,
   previewEstadoAportaciones, previewNominaJubilados, previewResumenJubilados,
   pdfNominaSueldos, pdfNominaTiempoExtra, pdfEstadoCuenta, pdfResumen, pdfNominaPrestamos,
-  pdfEstadoAportaciones, pdfNominaJubilados, pdfResumenJubilados
+  pdfEstadoAportaciones, excelEstadoAportaciones, pdfNominaJubilados, pdfResumenJubilados
 };
