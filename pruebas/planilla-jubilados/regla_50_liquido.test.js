@@ -111,6 +111,31 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   ok(eq(pr[3], 3000) && eq(pr[4], 7000) && eq(pr[1], 28000), "Carla: sus 2 préstamos restaurados; Juan no se afecta");
   ok((await fila(4)) === null && (await fila(1)) !== null, "Carla sale de la planilla; Juan sigue");
 
+  console.log("== OTROS DESCUENTOS: descuento extraordinario cargado para la planilla del mes");
+  const anaAntes = await fila(2);
+  await c.query("DELETE FROM RPJ_MNT_OTRO_DESCUENTO");
+  await c.query(`INSERT INTO RPJ_MNT_OTRO_DESCUENTO (ode_tipo_manejo, ode_id_jubilado, ode_periodo, ode_tipo_descuento, ode_valor, ode_motivo, ode_fecha, ode_estado, ode_usuario_creacion) VALUES
+    (2, 2, ?, 9, 100, 'PRUEBA EXTRA', CURDATE(), 'ACTIVO', 'prueba'),
+    (2, 2, ?, 9, 999, 'ANULADO', CURDATE(), 'ANULADO', 'prueba'),
+    (2, 1, ?, 9, 777, 'OTRO MES', CURDATE(), 'ACTIVO', 'prueba')`, [periodoActual, periodoActual, periodoFin]);
+  await c.query("CALL sp_reversar_planilla_pensionados(900, 'prueba', 'test')");
+  await c.query("CALL sp_generar_nomina_pensionados(900, 1, 'prueba', @a, @b, @c, @d)");
+  let anaCon = await fila(2);
+  const [[extra]] = await c.query("SELECT COUNT(*) n, COALESCE(SUM(nde_valor),0) v FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_id_planilla=900 AND nde_id_jubilado=2 AND nde_tipo_descuento=9");
+  ok(extra.n === 1 && eq(extra.v, 100), "Ana: entra solo el descuento ACTIVO del período (100); el anulado no");
+  ok(eq(anaCon.desc, Number(anaAntes.desc) + 100) && eq(anaCon.neto, r2(Number(anaAntes.neto) - 50)), "Ana: el líquido baja 100 y recibe 50 menos (50%)");
+  ok(eq((await fila(1)).desc, 2015), "Juan: el descuento de otro mes no se aplica");
+  await c.query("CALL sp_reversar_planilla_pensionados(900, 'prueba', 'test')");
+  await c.query("CALL sp_generar_nomina_pensionados(900, 1, 'prueba', @a, @b, @c, @d)");
+  anaCon = await fila(2);
+  ok(eq(anaCon.desc, Number(anaAntes.desc) + 100), "al reversar y generar de nuevo el descuento sigue presente");
+  // Se deja todo como estaba para las verificaciones del cierre.
+  await c.query("DELETE FROM RPJ_MNT_OTRO_DESCUENTO");
+  await c.query("CALL sp_reversar_planilla_pensionados(900, 'prueba', 'test')");
+  await c.query("CALL sp_generar_nomina_pensionados(900, 1, 'prueba', @a, @b, @c, @d)");
+  await c.query("CALL sp_reversar_pago_pensionado(900, 4, 'prueba', 'test')");
+  ok(eq((await fila(2)).desc, anaAntes.desc), "sin el descuento, Ana vuelve a lo de antes");
+
   console.log("== CERRAR: el mes entra a la deuda y el pago se abona al mes más antiguo");
   const pendAntesCierre = await pendiente(1);
   const turnoAntes = (await deudas(1)).find((d) => d.e !== "PAGADA");

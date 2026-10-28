@@ -155,7 +155,7 @@ BEGIN
 
     -- Préstamos vigentes en el mes (tipo según el banco; sin préstamo ligado porque es historia).
     INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
-    SELECT 2, 2, p_id_pla, b.id_jubilado, COALESCE(td.tde_id, 9), p.prr_valor_mes, b.dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+    SELECT 2, 2, p_id_pla, b.id_jubilado, COALESCE(td.tde_id, 7), p.prr_valor_mes, b.dias, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
       FROM tmp_desc_base b
       JOIN RPJ_MNT_PRESTAMOS_REGIMEN p ON p.prr_id_jubilado = b.id_jubilado AND p.prr_tipo_manejo = 2
                                       AND p.prr_estado <> 'ANULADO'
@@ -649,6 +649,16 @@ BEGIN
                 INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
                 VALUES (2, 2, p_id_planilla, v_id_jubilado, 8, v_monto_asociacion, v_dias_trabajados, 'JUBILADO', 'ADMINISTRATIVA', p_usuario);
             END IF;
+
+            -- Otros descuentos (extraordinarios) cargados para el jubilado en esta
+            -- planilla (catálogo Otros descuentos, por período). Van antes del líquido,
+            -- así el porcentaje se calcula ya con el descuento y siempre se vuelven a
+            -- aplicar al reversar y generar de nuevo.
+            INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor, nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+            SELECT 2, 2, p_id_planilla, v_id_jubilado, o.ode_tipo_descuento, o.ode_valor, v_dias_trabajados, 'JUBILADO', 'ADMINISTRATIVA', p_usuario
+              FROM RPJ_MNT_OTRO_DESCUENTO o
+             WHERE o.ode_tipo_manejo = 2 AND o.ode_id_jubilado = v_id_jubilado
+               AND o.ode_periodo = v_periodo_pla AND o.ode_estado = 'ACTIVO';
 
             SELECT COALESCE(SUM(nde_valor), 0) INTO v_desc_total
               FROM RPJ_PRC_NOMINA_DESCUENTO

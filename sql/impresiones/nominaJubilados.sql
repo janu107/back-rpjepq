@@ -51,11 +51,11 @@ INNER JOIN (
 LEFT JOIN (
   SELECT nde_id_jubilado,
          SUM(CASE WHEN nde_tipo_descuento = 8 THEN nde_valor ELSE 0 END) AS asociacion,
-         SUM(CASE WHEN nde_tipo_descuento IN (7, 9, 11) THEN nde_valor ELSE 0 END) AS prestamos,
+         SUM(CASE WHEN nde_tipo_descuento IN (7, 11) THEN nde_valor ELSE 0 END) AS prestamos,
          SUM(CASE WHEN nde_tipo_descuento = 4 THEN nde_valor ELSE 0 END) AS judicial,
          SUM(CASE WHEN nde_tipo_descuento = 5 THEN nde_valor ELSE 0 END) AS banrural,
          SUM(CASE WHEN nde_tipo_descuento = 6 THEN nde_valor ELSE 0 END) AS bantrab,
-         SUM(CASE WHEN nde_tipo_descuento IN (1, 2, 3) THEN nde_valor ELSE 0 END) AS otros,
+         SUM(CASE WHEN nde_tipo_descuento IN (1, 2, 3, 9, 10) THEN nde_valor ELSE 0 END) AS otros,
          SUM(nde_valor) AS total_descuentos
     FROM RPJ_PRC_NOMINA_DESCUENTO
    WHERE nde_id_planilla = ? AND nde_id_jubilado IS NOT NULL AND nde_id_beneficiario IS NULL
