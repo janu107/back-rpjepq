@@ -19,13 +19,28 @@ SELECT
   COALESCE(da.total_descuentos, 0)                      AS total_descuentos,
   ni.nin_valor - COALESCE(da.total_descuentos, 0)       AS neto_a_pagar,
   pp.ppl_estado_proceso                                 AS estado_planilla,
-  IF(ni.nin_id_beneficiario IS NULL, dat.dat_cuenta, NULL)      AS cuenta_banco,
-  IF(ni.nin_id_beneficiario IS NULL, dat.dat_forma_pago, NULL)  AS forma_pago,
-  IF(ni.nin_id_beneficiario IS NULL, b.ban_descripcion, NULL)   AS banco_nombre
+  -- Beneficiarios: a los menores se les deposita en la cuenta de la tutora.
+  CASE WHEN ni.nin_id_beneficiario IS NULL THEN dat.dat_cuenta
+       WHEN pagaTutora.tut_correlativo IS NOT NULL THEN pagaTutora.tut_cuenta ELSE bn.ben_cuenta END       AS cuenta_banco,
+  CASE WHEN ni.nin_id_beneficiario IS NULL THEN dat.dat_forma_pago
+       WHEN pagaTutora.tut_correlativo IS NOT NULL THEN pagaTutora.tut_forma_pago ELSE bn.ben_forma_pago END AS forma_pago,
+  CASE WHEN ni.nin_id_beneficiario IS NULL THEN b.ban_descripcion
+       WHEN pagaTutora.tut_correlativo IS NOT NULL THEN bt.ban_descripcion ELSE bbn.ban_descripcion END      AS banco_nombre,
+  CASE WHEN pagaTutora.tut_correlativo IS NOT NULL
+       THEN TRIM(CONCAT(COALESCE(pagaTutora.tut_nombres, ''), ' ', pagaTutora.tut_apellidos)) END             AS pagar_a
 FROM RPJ_PRC_NOMINA_INGRESO ni
 INNER JOIN RPJ_MNT_JUBILADO j            ON j.jub_correlativo  = ni.nin_id_jubilado
 INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA pp ON pp.ppl_correlativo = ni.nin_id_planilla
 LEFT JOIN  RPJ_MNT_BENEFICIARIO bn       ON bn.ben_correlativo = ni.nin_id_beneficiario
+LEFT JOIN  RPJ_MNT_TUTOR pagaTutora
+       ON pagaTutora.tut_correlativo = (
+            SELECT t2.tut_correlativo FROM RPJ_MNT_TUTOR t2
+             WHERE t2.tut_id_beneficiario = bn.ben_correlativo AND t2.tut_estado = 'VIGENTE'
+               AND bn.ben_tipo_parentesco <> 'ESPOSA'
+               AND TIMESTAMPDIFF(YEAR, bn.ben_fecha_nacimiento, pp.ppl_fecha_inicio) < 18
+             ORDER BY t2.tut_correlativo DESC LIMIT 1)
+LEFT JOIN  RPJ_CAT_BANCOS bt             ON bt.ban_id = pagaTutora.tut_id_banco
+LEFT JOIN  RPJ_CAT_BANCOS bbn            ON bbn.ban_id = bn.ben_id_banco
 LEFT JOIN  RPJ_PRC_DEUDA_JUBILADO deu    ON deu.deu_correlativo = ni.nin_id_deuda_aplicada
 LEFT JOIN  RPJ_MNT_DATOS_PLANILLA dat
        ON dat.dat_correlativo = (

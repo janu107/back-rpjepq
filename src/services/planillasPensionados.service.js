@@ -72,7 +72,8 @@ const mapDetalle = (row) => ({
   estadoPlanilla: row.estado_planilla,
   cuentaBanco: row.cuenta_banco,
   formaPago: row.forma_pago,
-  bancoNombre: row.banco_nombre
+  bancoNombre: row.banco_nombre,
+  pagarA: row.pagar_a || null
 });
 
 const validate = (data) => {
@@ -588,7 +589,8 @@ const exportBanco = async (id) => {
   const lines = detalle.map((r) => {
     const cuenta = (r.cuentaBanco || "").replace(/\s/g, "");
     const monto = r.netoPagar.toFixed(2);
-    const nombre = r.nombreCompleto.substring(0, 40).padEnd(40);
+    // A los menores se les deposita a la tutora: el archivo lleva su nombre.
+    const nombre = (r.pagarA || r.nombreCompleto).substring(0, 40).padEnd(40);
     return `${cuenta}|${nombre}|${monto}`;
   });
   return {

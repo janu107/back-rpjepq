@@ -24,6 +24,24 @@ const edad = (fechaNac) => {
 
 const esDpiValido = (dpi) => /^[0-9]{13}$/.test(String(dpi || "").trim());
 
+// Datos de pago (cuenta donde se deposita). Con ABONO CUENTA se exigen banco,
+// tipo y número de cuenta; con CHEQUE no. Sin forma de pago queda pendiente.
+const FORMAS_PAGO = ["ABONO CUENTA", "CHEQUE"];
+const TIPOS_CUENTA = ["AHORRO", "MONETARIA"];
+const datosPago = (o, etiqueta) => {
+  const forma = String(o?.formaPago || "").trim().toUpperCase() || null;
+  if (forma && !FORMAS_PAGO.includes(forma)) throw createError(`${etiqueta}: forma de pago no válida (ABONO CUENTA o CHEQUE)`);
+  const idBanco = o?.idBanco ? Number(o.idBanco) : null;
+  const tipo = String(o?.tipoCuenta || "").trim().toUpperCase() || null;
+  const cuenta = String(o?.cuenta || "").replace(/\s/g, "").toUpperCase() || null;
+  if (forma === "ABONO CUENTA") {
+    if (!idBanco) throw createError(`${etiqueta}: seleccione el banco`);
+    if (!tipo || !TIPOS_CUENTA.includes(tipo)) throw createError(`${etiqueta}: seleccione el tipo de cuenta (AHORRO o MONETARIA)`);
+    if (!cuenta) throw createError(`${etiqueta}: ingrese el número de cuenta`);
+  }
+  return forma === "CHEQUE" ? [forma, idBanco, null, null] : [forma, idBanco, tipo, cuenta];
+};
+
 const mapBeneficiario = (b) => ({
   id: b.id,
   idJubilado: b.idJubilado,
@@ -38,6 +56,11 @@ const mapBeneficiario = (b) => ({
   estado: b.estado,
   empleadorEstatal: b.empleadorEstatal,
   fechaInicioEmpleo: b.fechaInicioEmpleo,
+  formaPago: b.formaPago || null,
+  idBanco: b.idBanco || null,
+  bancoNombre: b.bancoNombre || null,
+  tipoCuenta: b.tipoCuenta || null,
+  cuenta: b.cuenta || null,
   edad: b.fechaNacimiento ? edad(b.fechaNacimiento) : null,
   esMenor: b.fechaNacimiento ? edad(b.fechaNacimiento) < 18 : false
 });
@@ -85,8 +108,12 @@ const getByJubilado = async (idJubilado) => {
             ben_nombres AS nombres, ben_apellidos AS apellidos, ben_dpi AS dpi,
             ben_fecha_nacimiento AS fechaNacimiento, ben_porcentaje AS porcentaje,
             ben_telefono AS telefono, ben_correo AS correo, ben_estado AS estado,
-            ben_empleador_estatal AS empleadorEstatal, ben_fecha_inicio_empleo AS fechaInicioEmpleo
-       FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? ORDER BY ben_correlativo`,
+            ben_empleador_estatal AS empleadorEstatal, ben_fecha_inicio_empleo AS fechaInicioEmpleo,
+            ben_forma_pago AS formaPago, ben_id_banco AS idBanco, bb.ban_descripcion AS bancoNombre,
+            ben_tipo_cuenta AS tipoCuenta, ben_cuenta AS cuenta
+       FROM RPJ_MNT_BENEFICIARIO
+       LEFT JOIN RPJ_CAT_BANCOS bb ON bb.ban_id = ben_id_banco
+      WHERE ben_id_jubilado = ? ORDER BY ben_correlativo`,
     [idJubilado]
   );
   const beneficiarios = rows.map(mapBeneficiario);
@@ -95,8 +122,11 @@ const getByJubilado = async (idJubilado) => {
     const [tutores] = await pool.query(
       `SELECT tut_correlativo AS id, tut_id_beneficiario AS idBeneficiario, tut_nombres AS nombres,
               tut_apellidos AS apellidos, tut_dpi AS dpi, tut_parentesco AS parentesco, tut_telefono AS telefono,
-              tut_fecha_inicio AS fechaInicio, tut_estado AS estado
-         FROM RPJ_MNT_TUTOR WHERE tut_id_beneficiario IN (?) ORDER BY tut_correlativo`,
+              tut_fecha_inicio AS fechaInicio, tut_estado AS estado,
+              tut_forma_pago AS formaPago, tut_id_banco AS idBanco, tb.ban_descripcion AS bancoNombre,
+              tut_tipo_cuenta AS tipoCuenta, tut_cuenta AS cuenta
+         FROM RPJ_MNT_TUTOR LEFT JOIN RPJ_CAT_BANCOS tb ON tb.ban_id = tut_id_banco
+        WHERE tut_id_beneficiario IN (?) ORDER BY tut_correlativo`,
       [ids]
     );
     beneficiarios.forEach((b) => { b.tutores = tutores.filter((t) => t.idBeneficiario === b.id); });
@@ -179,10 +209,12 @@ const registrarLote = async (payload, currentUser) => {
       const [res] = await conn.execute(
         `INSERT INTO RPJ_MNT_BENEFICIARIO
            (ben_id_jubilado, ben_tipo_parentesco, ben_nombres, ben_apellidos, ben_dpi,
-            ben_fecha_nacimiento, ben_porcentaje, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?)`,
+            ben_fecha_nacimiento, ben_porcentaje, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion,
+            ben_forma_pago, ben_id_banco, ben_tipo_cuenta, ben_cuenta)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?, ?, ?, ?, ?)`,
         [idJubilado, String(b.tipoParentesco).toUpperCase(), b.nombres || "", b.apellidos, String(b.dpi).trim(),
-         b.fechaNacimiento, toNum(b.porcentaje), b.telefono || null, b.correo || null, usuario]
+         b.fechaNacimiento, toNum(b.porcentaje), b.telefono || null, b.correo || null, usuario,
+         ...datosPago(b, `Beneficiario ${b.apellidos}`)]
       );
       const idBen = res.insertId;
       if (b.tutora) {
@@ -190,10 +222,12 @@ const registrarLote = async (payload, currentUser) => {
         await conn.execute(
           // La tutoría empieza al registrarla (o en la fecha indicada).
           `INSERT INTO RPJ_MNT_TUTOR
-             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
-           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
+             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion,
+              tut_forma_pago, tut_id_banco, tut_tipo_cuenta, tut_cuenta)
+           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?, ?, ?, ?, ?)`,
           [idBen, t.nombres || "", t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null,
-           /^\d{4}-\d{2}-\d{2}/.test(String(t.fechaInicio || "")) ? String(t.fechaInicio).slice(0, 10) : null, usuario]
+           /^\d{4}-\d{2}-\d{2}/.test(String(t.fechaInicio || "")) ? String(t.fechaInicio).slice(0, 10) : null, usuario,
+           ...datosPago(t, `Tutora de ${b.apellidos}`)]
         );
       }
     }
@@ -264,6 +298,8 @@ const actualizar = async (id, payload, currentUser) => {
   if (menor && !t && !tutVig.length) validarTutora(null, "El beneficiario");
   if (t) validarTutora(t, "El beneficiario");
 
+  const pagoBen = datosPago(payload, "El beneficiario");
+  const pagoTut = t ? datosPago(t, "La tutora") : null;
   const usuario = currentUser?.usuario || "sistema";
   const conn = await pool.getConnection();
   try {
@@ -271,26 +307,28 @@ const actualizar = async (id, payload, currentUser) => {
     await conn.execute(
       `UPDATE RPJ_MNT_BENEFICIARIO
           SET ben_tipo_parentesco = ?, ben_nombres = ?, ben_apellidos = ?, ben_dpi = ?, ben_fecha_nacimiento = ?,
-              ben_telefono = ?, ben_correo = ?
+              ben_telefono = ?, ben_correo = ?, ben_forma_pago = ?, ben_id_banco = ?, ben_tipo_cuenta = ?, ben_cuenta = ?
         WHERE ben_correlativo = ?`,
       [parentesco, String(b.nombres || "").trim().toUpperCase(), String(b.apellidos).trim().toUpperCase(), dpi,
-       fechaValida(b.fechaNacimiento), b.telefono || null, b.correo || null, id]
+       fechaValida(b.fechaNacimiento), b.telefono || null, b.correo || null, ...pagoBen, id]
     );
     if (t) {
       const datos = [t.nombres ? String(t.nombres).trim().toUpperCase() : "", String(t.apellidos).trim().toUpperCase(),
         String(t.dpi).trim(), t.parentesco ? String(t.parentesco).toUpperCase() : null, t.telefono || null];
       if (tutVig.length) {
         await conn.execute(
-          `UPDATE RPJ_MNT_TUTOR SET tut_nombres = ?, tut_apellidos = ?, tut_dpi = ?, tut_parentesco = ?, tut_telefono = ?
+          `UPDATE RPJ_MNT_TUTOR SET tut_nombres = ?, tut_apellidos = ?, tut_dpi = ?, tut_parentesco = ?, tut_telefono = ?,
+                  tut_forma_pago = ?, tut_id_banco = ?, tut_tipo_cuenta = ?, tut_cuenta = ?
             WHERE tut_correlativo = ?`,
-          [...datos, tutVig[0].tut_correlativo]
+          [...datos, ...pagoTut, tutVig[0].tut_correlativo]
         );
       } else {
         await conn.execute(
           `INSERT INTO RPJ_MNT_TUTOR
-             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
-           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
-          [id, ...datos, fechaValida(t.fechaInicio), usuario]
+             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion,
+              tut_forma_pago, tut_id_banco, tut_tipo_cuenta, tut_cuenta)
+           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?, ?, ?, ?, ?)`,
+          [id, ...datos, fechaValida(t.fechaInicio), usuario, ...pagoTut]
         );
       }
     }
@@ -352,11 +390,13 @@ const registrarTutor = async (payload, currentUser) => {
   const usuario = currentUser?.usuario || "sistema";
   const [res] = await pool.execute(
     `INSERT INTO RPJ_MNT_TUTOR
-       (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
-     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
+       (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion,
+        tut_forma_pago, tut_id_banco, tut_tipo_cuenta, tut_cuenta)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?, ?, ?, ?, ?)`,
     [payload.idBeneficiario, payload.nombres || "", payload.apellidos, String(payload.dpi).trim(),
      payload.parentesco || null, payload.telefono || null,
-     /^\d{4}-\d{2}-\d{2}/.test(String(payload.fechaInicio || "")) ? String(payload.fechaInicio).slice(0, 10) : null, usuario]
+     /^\d{4}-\d{2}-\d{2}/.test(String(payload.fechaInicio || "")) ? String(payload.fechaInicio).slice(0, 10) : null, usuario,
+     ...datosPago(payload, "Tutora")]
   );
   return { id: res.insertId };
 };

@@ -53,6 +53,26 @@ CREATE TABLE IF NOT EXISTS RPJ_PRC_APLICACION_PAGO_BEN (
   CONSTRAINT fk_apb_planilla FOREIGN KEY (apb_id_planilla) REFERENCES RPJ_CAT_PARAMETRO_PLANILLA (ppl_correlativo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Datos de pago: cuenta de la esposa / beneficiario mayor y de la tutora (a
+-- quien se le deposita lo de los menores).
+SET @existe := (SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RPJ_MNT_BENEFICIARIO' AND COLUMN_NAME = 'ben_cuenta');
+SET @ddl := IF(@existe = 0,
+  'ALTER TABLE RPJ_MNT_BENEFICIARIO ADD COLUMN ben_forma_pago VARCHAR(20) NULL, ADD COLUMN ben_id_banco INT NULL, ADD COLUMN ben_tipo_cuenta VARCHAR(20) NULL, ADD COLUMN ben_cuenta VARCHAR(50) NULL',
+  'SELECT 1');
+PREPARE st FROM @ddl;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @existe := (SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RPJ_MNT_TUTOR' AND COLUMN_NAME = 'tut_cuenta');
+SET @ddl := IF(@existe = 0,
+  'ALTER TABLE RPJ_MNT_TUTOR ADD COLUMN tut_forma_pago VARCHAR(20) NULL, ADD COLUMN tut_id_banco INT NULL, ADD COLUMN tut_tipo_cuenta VARCHAR(20) NULL, ADD COLUMN tut_cuenta VARCHAR(50) NULL',
+  'SELECT 1');
+PREPARE st FROM @ddl;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
 -- ---------------------------------------------------------------------------
 -- Primer mes (AAAAMM) que se les debe a los beneficiarios: el mes siguiente al
 -- último mes que se le debe al fallecido, o el del fallecimiento si ese mes no
