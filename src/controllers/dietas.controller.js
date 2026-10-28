@@ -16,7 +16,7 @@ const recibir = async (req, res, next) => { try { return successResponse(res, aw
 
 const cheque = async (req, res, next) => {
   try {
-    const { buffer, filename } = await service.generarChequePdf(req.params.id, req.user?.usuario);
+    const { buffer, filename } = await service.generarChequePdf(req.params.id, req.user?.usuario, req.query.modo);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
     return res.send(buffer);
