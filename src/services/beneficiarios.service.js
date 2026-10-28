@@ -94,8 +94,9 @@ const getByJubilado = async (idJubilado) => {
     const ids = beneficiarios.map((b) => b.id);
     const [tutores] = await pool.query(
       `SELECT tut_correlativo AS id, tut_id_beneficiario AS idBeneficiario, tut_nombres AS nombres,
-              tut_apellidos AS apellidos, tut_dpi AS dpi, tut_parentesco AS parentesco, tut_telefono AS telefono
-         FROM RPJ_MNT_TUTOR WHERE tut_id_beneficiario IN (?)`,
+              tut_apellidos AS apellidos, tut_dpi AS dpi, tut_parentesco AS parentesco, tut_telefono AS telefono,
+              tut_fecha_inicio AS fechaInicio, tut_estado AS estado
+         FROM RPJ_MNT_TUTOR WHERE tut_id_beneficiario IN (?) ORDER BY tut_correlativo`,
       [ids]
     );
     beneficiarios.forEach((b) => { b.tutores = tutores.filter((t) => t.idBeneficiario === b.id); });
@@ -221,6 +222,130 @@ const remove = async (id, currentUser) => {
   return { id: Number(id) };
 };
 
+// ---------------------------------------------------------------------------
+// Edición de un beneficiario ya registrado (datos y su tutora). El porcentaje
+// se cambia aparte (actualizarPorcentajes) porque entre todos deben sumar 100.
+// ---------------------------------------------------------------------------
+const fechaValida = (v) => {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+  }
+  return /^\d{4}-\d{2}-\d{2}/.test(String(v || "")) ? String(v).slice(0, 10) : null;
+};
+
+const actualizar = async (id, payload, currentUser) => {
+  const [rows] = await pool.execute(
+    "SELECT ben_correlativo, ben_id_jubilado, ben_porcentaje FROM RPJ_MNT_BENEFICIARIO WHERE ben_correlativo = ?", [id]
+  );
+  if (!rows[0]) throw createError("Beneficiario no encontrado", 404);
+  const actual = rows[0];
+  const b = { ...payload, porcentaje: actual.ben_porcentaje };
+  validarBeneficiario(b, 0);
+  const parentesco = String(b.tipoParentesco).toUpperCase();
+  const dpi = String(b.dpi).trim();
+
+  const [dup] = await pool.execute(
+    "SELECT ben_correlativo FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_dpi = ? AND ben_correlativo <> ?",
+    [actual.ben_id_jubilado, dpi, id]
+  );
+  if (dup.length) throw createError(`El DPI ${dpi} ya está registrado en otro beneficiario de este jubilado`);
+  if (parentesco === "ESPOSA") {
+    const [esp] = await pool.execute(
+      "SELECT ben_correlativo FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_tipo_parentesco = 'ESPOSA' AND ben_correlativo <> ?",
+      [actual.ben_id_jubilado, id]
+    );
+    if (esp.length) throw createError("Este jubilado ya tiene un beneficiario con parentesco ESPOSA");
+  }
+  const menor = edad(b.fechaNacimiento) < 18;
+  const [tutVig] = await pool.execute(
+    "SELECT tut_correlativo FROM RPJ_MNT_TUTOR WHERE tut_id_beneficiario = ? AND tut_estado = 'VIGENTE' ORDER BY tut_correlativo DESC LIMIT 1", [id]
+  );
+  const t = payload.tutora && (payload.tutora.apellidos || payload.tutora.dpi) ? payload.tutora : null;
+  if (menor && !t && !tutVig.length) validarTutora(null, "El beneficiario");
+  if (t) validarTutora(t, "El beneficiario");
+
+  const usuario = currentUser?.usuario || "sistema";
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `UPDATE RPJ_MNT_BENEFICIARIO
+          SET ben_tipo_parentesco = ?, ben_nombres = ?, ben_apellidos = ?, ben_dpi = ?, ben_fecha_nacimiento = ?,
+              ben_telefono = ?, ben_correo = ?
+        WHERE ben_correlativo = ?`,
+      [parentesco, String(b.nombres || "").trim().toUpperCase(), String(b.apellidos).trim().toUpperCase(), dpi,
+       fechaValida(b.fechaNacimiento), b.telefono || null, b.correo || null, id]
+    );
+    if (t) {
+      const datos = [t.nombres ? String(t.nombres).trim().toUpperCase() : "", String(t.apellidos).trim().toUpperCase(),
+        String(t.dpi).trim(), t.parentesco ? String(t.parentesco).toUpperCase() : null, t.telefono || null];
+      if (tutVig.length) {
+        await conn.execute(
+          `UPDATE RPJ_MNT_TUTOR SET tut_nombres = ?, tut_apellidos = ?, tut_dpi = ?, tut_parentesco = ?, tut_telefono = ?
+            WHERE tut_correlativo = ?`,
+          [...datos, tutVig[0].tut_correlativo]
+        );
+      } else {
+        await conn.execute(
+          `INSERT INTO RPJ_MNT_TUTOR
+             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
+           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
+          [id, ...datos, fechaValida(t.fechaInicio), usuario]
+        );
+      }
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === "ER_DUP_ENTRY") throw createError("Ya existe un beneficiario con ese DPI", 409);
+    throw e;
+  } finally {
+    conn.release();
+  }
+  logger.info("Beneficiario actualizado", { id, usuario });
+  return getByJubilado(actual.ben_id_jubilado);
+};
+
+// Reparte de nuevo los porcentajes de todos los beneficiarios de un jubilado.
+// payload: { porcentajes: [{ id, porcentaje }] }. Deben venir todos y sumar 100.
+const actualizarPorcentajes = async (idJubilado, payload, currentUser) => {
+  const lista = Array.isArray(payload?.porcentajes) ? payload.porcentajes : [];
+  const [rows] = await pool.execute(
+    "SELECT ben_correlativo AS id, ben_estado AS estado FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ?", [idJubilado]
+  );
+  if (!rows.length) throw createError("El jubilado no tiene beneficiarios", 404);
+  const ids = new Set(rows.map((r) => Number(r.id)));
+  if (lista.length !== ids.size || !lista.every((x) => ids.has(Number(x.id)))) {
+    throw createError("Debe indicar el porcentaje de todos los beneficiarios del jubilado");
+  }
+  lista.forEach((x) => {
+    const p = toNum(x.porcentaje);
+    if (p <= 0 || p > 100) throw createError("Cada porcentaje debe estar entre 0.01 y 100");
+  });
+  const total = Math.round(lista.reduce((s, x) => s + toNum(x.porcentaje), 0) * 100) / 100;
+  if (total !== 100) throw createError(`La suma de porcentajes debe ser 100.00 (actual: ${total.toFixed(2)})`);
+  // Si ya hay beneficiarios cobrando, el reparto no se cambia desde aquí.
+  const cobrando = rows.find((r) => ["ACTIVO", "SUSPENDIDO"].includes(String(r.estado).toUpperCase()));
+  if (cobrando) throw createError("Los beneficiarios ya están cobrando: el reparto de porcentajes no se puede cambiar aquí", 409);
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const x of lista) {
+      await conn.execute("UPDATE RPJ_MNT_BENEFICIARIO SET ben_porcentaje = ? WHERE ben_correlativo = ? AND ben_id_jubilado = ?",
+        [Math.round(toNum(x.porcentaje) * 100) / 100, x.id, idJubilado]);
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+  logger.info("Porcentajes de beneficiarios actualizados", { idJubilado, usuario: currentUser?.usuario });
+  return getByJubilado(idJubilado);
+};
+
 const registrarTutor = async (payload, currentUser) => {
   if (!payload?.idBeneficiario) throw createError("Debe indicar el beneficiario (idBeneficiario)");
   validarTutora(payload, "Tutora");
@@ -304,6 +429,6 @@ const reactivar = async (id, currentUser) => {
 };
 
 module.exports = {
-  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor,
+  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, actualizar, actualizarPorcentajes,
   getActivos, getSuspendidos, suspender, reactivar
 };
