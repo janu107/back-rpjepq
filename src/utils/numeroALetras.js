@@ -46,7 +46,7 @@ const enteroALetras = (entero) => {
   if (resto > 0) partes.push(tresDigitos(resto));
 
   // "UNO" suelto al final de una cifra se dice "UN" (ej. VEINTIUN QUETZALES).
-  return partes.join(" ").replace(/\bVEINTIUNO\b/g, "VEINTIUN").replace(/\bUNO$/, "UN");
+  return partes.join(" ").replace(/\bVEINTIUNO\b/g, "VEINTIUN").replace(/\bUNO$/, "UN").replace(/\bUNO (MIL|MILLONES)\b/g, "UN $1");
 };
 
 const numeroALetras = (valor, moneda = "QUETZALES") => {

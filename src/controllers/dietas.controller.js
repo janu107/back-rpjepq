@@ -14,4 +14,13 @@ const detalle = async (req, res, next) => { try { return successResponse(res, aw
 const pagar = async (req, res, next) => { try { return successResponse(res, await service.marcarPagado(req.params.id, req.body, req.user), "Pago emitido correctamente"); } catch (error) { next(error); } };
 const recibir = async (req, res, next) => { try { return successResponse(res, await service.marcarRecibido(req.params.id, req.body, req.user), "Pago marcado como recibido"); } catch (error) { next(error); } };
 
-module.exports = { list, getById, create, update, remove, pagosDelMes, recalcular, detalle, pagar, recibir };
+const cheque = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.generarChequePdf(req.params.id, req.user?.usuario);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (error) { next(error); }
+};
+
+module.exports = { cheque, list, getById, create, update, remove, pagosDelMes, recalcular, detalle, pagar, recibir };

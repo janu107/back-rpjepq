@@ -14,6 +14,7 @@ router.post("/recalcular", ADMIN_OP, auditAction("DIETAS", "RECALCULAR", "Recalc
 
 router.get("/", ADMIN_OP, controller.list);
 router.get("/:id/detalle", ADMIN_OP, controller.detalle);
+router.get("/:id/cheque", ADMIN_OP, controller.cheque);
 router.get("/:id", ADMIN_OP, controller.getById);
 // El encabezado de dieta NO se crea/edita libremente: se genera desde el flujo de
 // sesiones (asistencia) y su estado/montos cambian solo por /pagar, /recibir y /recalcular.
