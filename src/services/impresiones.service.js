@@ -843,7 +843,7 @@ const pdfNominaPrestamos = async (query, user) => {
 // ---------------------------------------------------------------------------
 const getNominaJubilados = async (idPlanilla, opciones = {}) => {
   const planilla = await getPlanilla(idPlanilla);
-  const [rows] = await pool.execute(sql("nominaJubilados"), [idPlanilla, idPlanilla]);
+  const [rows] = await pool.execute(sql("nominaJubilados"), [idPlanilla, idPlanilla, idPlanilla]);
   const tipo = String(opciones.tipoJubilacion || "").trim().toUpperCase();
   const filas = tipo ? rows.filter((r) => String(r.tipo_jubilacion).toUpperCase() === tipo) : rows;
   return { planilla, filas, tipoJubilacion: tipo || null };

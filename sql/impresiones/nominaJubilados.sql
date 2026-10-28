@@ -1,8 +1,8 @@
 -- Nómina de jubilados de una planilla, para impresión en oficio.
 --
--- Sólo el pago propio del jubilado: los renglones de beneficiarios
--- (nin_id_beneficiario IS NOT NULL) se excluyen, porque este formato lista
--- pensionados por tipo de jubilación.
+-- Primero el pago propio de cada jubilado; después (UNION) los beneficiarios de
+-- jubilados fallecidos, agrupados como VIUDEZ (DEUDA) -cobra la deuda del fallecido-, VIUDEZ,
+-- ORFANDAD u ORFANDAD (LIQ.) -pago único al cumplir 18-. A los menores se les paga a la tutora (va en el nombre).
 --
 -- Ingresos y descuentos se agregan por separado para no multiplicar renglones.
 -- El desglose de descuentos sigue RPJ_CAT_TIPO_DESCUENTO:
@@ -14,7 +14,7 @@
 --   cómo queda ese mes con este pago: 100% completo o 50% aún pendiente. Si aún
 --   no se aplicó (planilla generada, se aplica al cerrar) se calcula como quedará.
 --   Sin meses atrasados: el mes de la planilla y su porcentaje de pago.
--- Params: [idPlanilla, idPlanilla].
+-- Params: [idPlanilla, idPlanilla, idPlanilla].
 SELECT
   j.jub_correlativo                           AS id_jubilado,
   j.jub_id                                    AS codigo,
@@ -64,4 +64,49 @@ LEFT JOIN (
 LEFT JOIN RPJ_CAT_TIPO_JUBILACION tj ON tj.tju_id = j.jub_tipo_jubilacion
 LEFT JOIN RPJ_PRC_DEUDA_JUBILADO deu ON deu.deu_correlativo = ing.id_deuda
 LEFT JOIN RPJ_CAT_PARAMETRO_PLANILLA pla ON pla.ppl_correlativo = ing.nin_id_planilla
-ORDER BY tipo_jubilacion, j.jub_apellidos, j.jub_nombres;
+
+UNION ALL
+
+-- Beneficiarios de jubilados fallecidos.
+SELECT
+  j.jub_correlativo,
+  j.jub_id,
+  CONCAT(TRIM(CONCAT(COALESCE(b.ben_nombres, ''), ' ', b.ben_apellidos)),
+         IF(tut.tut_correlativo IS NOT NULL AND TIMESTAMPDIFF(YEAR, b.ben_fecha_nacimiento, pla.ppl_fecha_inicio) < 18,
+            CONCAT(' (TUTORA: ', TRIM(CONCAT(COALESCE(tut.tut_nombres, ''), ' ', tut.tut_apellidos)), ')'), '')),
+  CASE i.nin_puesto
+    WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'VIUDEZ (DEUDA)'
+    WHEN 'LIQUIDACION ORFANDAD' THEN 'ORFANDAD (LIQ.)'
+    ELSE i.nin_puesto
+  END,
+  j.jub_fecha_fallecimiento,
+  i.nin_valor_teorico,
+  i.nin_valor,
+  0, 0, 0, 0, 0, 0, 0,
+  i.nin_valor,
+  CASE
+    WHEN i.nin_puesto = 'COBRO DEUDA DEL FALLECIDO' THEN COALESCE(deu.deu_periodo, pla.ppl_numero)
+    ELSE COALESCE(
+      (SELECT MIN(a.apb_periodo_deuda) FROM RPJ_PRC_APLICACION_PAGO_BEN a WHERE a.apb_id_planilla = i.nin_id_planilla AND a.apb_id_beneficiario = b.ben_correlativo),
+      (SELECT MIN(d.dbe_periodo) FROM RPJ_PRC_DEUDA_BENEFICIARIO d WHERE d.dbe_id_beneficiario = b.ben_correlativo AND d.dbe_estado IN ('PENDIENTE','PARCIAL') AND d.dbe_monto_pendiente > 0),
+      pla.ppl_numero)
+  END,
+  CASE
+    WHEN i.nin_puesto = 'LIQUIDACION ORFANDAD' THEN 100
+    WHEN i.nin_puesto = 'COBRO DEUDA DEL FALLECIDO' AND deu.deu_correlativo IS NOT NULL THEN
+      CASE WHEN EXISTS (SELECT 1 FROM RPJ_PRC_APLICACION_PAGO a WHERE a.apa_id_planilla = i.nin_id_planilla AND a.apa_id_deuda = deu.deu_correlativo)
+           THEN IF(deu.deu_monto_pendiente <= 0, 100, 50)
+           ELSE IF(i.nin_valor >= deu.deu_monto_pendiente, 100, 50) END
+    ELSE pla.ppl_porcentaje_pago
+  END
+FROM RPJ_PRC_NOMINA_INGRESO i
+JOIN RPJ_MNT_BENEFICIARIO b ON b.ben_correlativo = i.nin_id_beneficiario
+JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = i.nin_id_jubilado
+LEFT JOIN RPJ_CAT_PARAMETRO_PLANILLA pla ON pla.ppl_correlativo = i.nin_id_planilla
+LEFT JOIN RPJ_PRC_DEUDA_JUBILADO deu ON deu.deu_correlativo = i.nin_id_deuda_aplicada
+LEFT JOIN RPJ_MNT_TUTOR tut ON tut.tut_correlativo = (
+  SELECT t2.tut_correlativo FROM RPJ_MNT_TUTOR t2
+   WHERE t2.tut_id_beneficiario = b.ben_correlativo AND t2.tut_estado = 'VIGENTE'
+   ORDER BY t2.tut_correlativo DESC LIMIT 1)
+WHERE i.nin_id_planilla = ? AND i.nin_id_beneficiario IS NOT NULL
+ORDER BY tipo_jubilacion, nombre;

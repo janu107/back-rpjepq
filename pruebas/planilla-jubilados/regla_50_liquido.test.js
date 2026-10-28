@@ -146,6 +146,9 @@ const mesesEntre = (desde, hasta) => (Math.floor(hasta / 100) - Math.floor(desde
   ok(mesC && eq(mesC.o, 5985) && eq(mesC.pend, 5985) && mesC.pla === 900, "el mes actual queda como deuda de 5,985 (100%)");
   const [[aplicadoA]] = await c.query("SELECT MIN(apa_periodo_deuda) p FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
   ok(turnoAntes && aplicadoA.p === turnoAntes.p, `el pago se abona al mes en turno (${turnoAntes && turnoAntes.p})`);
+  const turnoDespues = dC.find((d) => d.p === turnoAntes.p);
+  ok(turnoDespues && turnoDespues.e === (Number(turnoDespues.pend) > 0 ? "PARCIAL" : "PAGADA"),
+    `el mes abonado queda ${turnoDespues && turnoDespues.e} con ${turnoDespues && turnoDespues.pend} pendiente (no PAGADA si aún se debe)`);
   ok(eq(await pendiente(1), r2(pendAntesCierre + 5985 - 2992.50)), "la deuda de Juan crece medio mes (+2,992.50)");
   const [[apl]] = await c.query("SELECT SUM(apa_monto_aplicado) t FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla=900 AND apa_id_jubilado=1");
   ok(eq(apl.t, 2992.50), "lo aplicado a la deuda = lo que recibe Juan");

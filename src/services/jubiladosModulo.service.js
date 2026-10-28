@@ -74,9 +74,10 @@ const assertJubilado = async (id) => {
 const deudaTotal = async (id) => {
   await assertJubilado(id);
   const [rows] = await pool.execute(
-    `SELECT COALESCE(SUM(deu_saldo), 0) AS deudaTotal, COUNT(*) AS periodos
-       FROM RPJ_MNT_DEUDA
-      WHERE deu_id_jubilado = ? AND deu_es_deuda = 1 AND deu_estado IN ('PENDIENTE','PARCIAL')`,
+    // Deuda vigente (regla del líquido). La tabla RPJ_MNT_DEUDA ya no se usa.
+    `SELECT COALESCE(SUM(deu_monto_pendiente), 0) AS deudaTotal, COUNT(*) AS periodos
+       FROM RPJ_PRC_DEUDA_JUBILADO
+      WHERE deu_id_jubilado = ? AND deu_estado IN ('PENDIENTE','PARCIAL') AND deu_monto_pendiente > 0`,
     [id]
   );
   return { idJubilado: Number(id), deudaTotal: toNum(rows[0].deudaTotal), periodosPendientes: toNum(rows[0].periodos) };

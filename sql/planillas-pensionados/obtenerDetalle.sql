@@ -2,7 +2,13 @@ SELECT
   j.jub_correlativo                                      AS id_jubilado,
   j.jub_id                                               AS codigo,
   j.jub_dpi                                              AS dpi,
-  CONCAT(j.jub_nombres, ' ', j.jub_apellidos)           AS nombre_completo,
+  -- Renglones de beneficiarios de fallecidos: su nombre y el concepto del pago.
+  CASE WHEN ni.nin_id_beneficiario IS NOT NULL
+       THEN TRIM(CONCAT(COALESCE(bn.ben_nombres, ''), ' ', bn.ben_apellidos))
+       ELSE CONCAT(j.jub_nombres, ' ', j.jub_apellidos) END AS nombre_completo,
+  ni.nin_id_beneficiario                                AS id_beneficiario,
+  CASE WHEN ni.nin_id_beneficiario IS NOT NULL THEN ni.nin_puesto END AS concepto_beneficiario,
+  CASE WHEN ni.nin_id_beneficiario IS NOT NULL THEN CONCAT(j.jub_nombres, ' ', j.jub_apellidos) END AS fallecido,
   j.jub_fecha_jubilacion                                AS fecha_jubilacion,
   COALESCE(ni.nin_valor_teorico,   0)                   AS pension_teorica,
   COALESCE(ni.nin_porcentaje_aplicado, 100)             AS porcentaje_aplicado,
@@ -13,12 +19,13 @@ SELECT
   COALESCE(da.total_descuentos, 0)                      AS total_descuentos,
   ni.nin_valor - COALESCE(da.total_descuentos, 0)       AS neto_a_pagar,
   pp.ppl_estado_proceso                                 AS estado_planilla,
-  dat.dat_cuenta                                        AS cuenta_banco,
-  dat.dat_forma_pago                                    AS forma_pago,
-  b.ban_descripcion                                     AS banco_nombre
+  IF(ni.nin_id_beneficiario IS NULL, dat.dat_cuenta, NULL)      AS cuenta_banco,
+  IF(ni.nin_id_beneficiario IS NULL, dat.dat_forma_pago, NULL)  AS forma_pago,
+  IF(ni.nin_id_beneficiario IS NULL, b.ban_descripcion, NULL)   AS banco_nombre
 FROM RPJ_PRC_NOMINA_INGRESO ni
 INNER JOIN RPJ_MNT_JUBILADO j            ON j.jub_correlativo  = ni.nin_id_jubilado
 INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA pp ON pp.ppl_correlativo = ni.nin_id_planilla
+LEFT JOIN  RPJ_MNT_BENEFICIARIO bn       ON bn.ben_correlativo = ni.nin_id_beneficiario
 LEFT JOIN  RPJ_PRC_DEUDA_JUBILADO deu    ON deu.deu_correlativo = ni.nin_id_deuda_aplicada
 LEFT JOIN  RPJ_MNT_DATOS_PLANILLA dat
        ON dat.dat_correlativo = (

@@ -574,8 +574,13 @@ BEGIN
      INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
        SET d.deu_monto_pagado    = d.deu_monto_pagado    - a.apa_monto_aplicado,
            d.deu_monto_pendiente = d.deu_monto_pendiente + a.apa_monto_aplicado,
-           d.deu_estado = CASE WHEN d.deu_monto_pagado - a.apa_monto_aplicado <= 0 THEN 'PENDIENTE' ELSE 'PARCIAL' END,
            d.deu_fecha_saldada = NULL
+     WHERE a.apa_id_planilla = p_id_planilla;
+    -- El estado se recalcula aparte: en un UPDATE de varias tablas MySQL no
+    -- garantiza el orden de las asignaciones.
+    UPDATE RPJ_PRC_DEUDA_JUBILADO d
+     INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
+       SET d.deu_estado = CASE WHEN d.deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN d.deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
      WHERE a.apa_id_planilla = p_id_planilla;
     DELETE FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla = p_id_planilla;
     DELETE FROM RPJ_PRC_DEUDA_JUBILADO   WHERE deu_id_planilla = p_id_planilla;
@@ -628,7 +633,7 @@ BEGIN
              WHERE dju_id_jubilado = v_id_jubilado AND dju_tipo_manejo = 2 AND dju_estado = 'ACTIVO' AND dju_saldo > 0;
             UPDATE RPJ_MNT_DESC_JUDICIALES
                SET dju_saldo = GREATEST(dju_saldo - dju_valor, 0),
-                   dju_estado = CASE WHEN dju_saldo - dju_valor <= 0 THEN 'CANCELADO' ELSE 'ACTIVO' END
+                   dju_estado = CASE WHEN dju_saldo <= 0 THEN 'CANCELADO' ELSE 'ACTIVO' END
              WHERE dju_id_jubilado = v_id_jubilado AND dju_tipo_manejo = 2 AND dju_estado = 'ACTIVO' AND dju_saldo > 0;
 
             -- Préstamos: el tipo de descuento sale del banco y se guarda el préstamo.
@@ -641,7 +646,7 @@ BEGIN
                AND p.prr_fecha_inicio <= v_fecha_final;
             UPDATE RPJ_MNT_PRESTAMOS_REGIMEN
                SET prr_saldo = GREATEST(prr_saldo - prr_valor_mes, 0),
-                   prr_estado = CASE WHEN prr_saldo - prr_valor_mes <= 0 THEN 'OPERADA' ELSE 'ACTIVO' END
+                   prr_estado = CASE WHEN prr_saldo <= 0 THEN 'OPERADA' ELSE 'ACTIVO' END
              WHERE prr_id_jubilado = v_id_jubilado AND prr_tipo_manejo = 2 AND prr_estado = 'ACTIVO' AND prr_saldo > 0
                AND prr_fecha_inicio <= v_fecha_final;
 
@@ -704,6 +709,11 @@ BEGIN
     END LOOP loop_jub;
     CLOSE cur_jub;
 
+    -- Beneficiarios de jubilados fallecidos (esposa: deuda del fallecido o viudez;
+    -- hijos: orfandad). Ver migration_beneficiarios_fallecimiento.sql.
+    CALL sp_generar_beneficiarios_planilla(p_id_planilla, p_usuario, @ben_proc, @ben_total);
+    SET p_total_pagado = p_total_pagado + COALESCE(@ben_total, 0);
+
     UPDATE RPJ_CAT_PARAMETRO_PLANILLA
        SET ppl_estado_proceso = 'GENERADA', ppl_fecha_generacion = NOW(), ppl_usuario_genera = p_usuario
      WHERE ppl_correlativo = p_id_planilla;
@@ -744,8 +754,13 @@ BEGIN
     INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
        SET d.deu_monto_pagado    = d.deu_monto_pagado - a.apa_monto_aplicado,
            d.deu_monto_pendiente = d.deu_monto_pendiente + a.apa_monto_aplicado,
-           d.deu_estado = CASE WHEN d.deu_monto_pagado - a.apa_monto_aplicado <= 0 THEN 'PENDIENTE' ELSE 'PARCIAL' END,
            d.deu_fecha_saldada = NULL
+     WHERE a.apa_id_planilla = p_id_planilla;
+    -- El estado se recalcula aparte: en un UPDATE de varias tablas MySQL no
+    -- garantiza el orden de las asignaciones.
+    UPDATE RPJ_PRC_DEUDA_JUBILADO d
+    INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
+       SET d.deu_estado = CASE WHEN d.deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN d.deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
      WHERE a.apa_id_planilla = p_id_planilla;
 
     -- Préstamos: cada descuento devuelve su saldo a SU préstamo.
@@ -820,8 +835,14 @@ BEGIN
     INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
        SET d.deu_monto_pagado    = d.deu_monto_pagado - a.apa_monto_aplicado,
            d.deu_monto_pendiente = d.deu_monto_pendiente + a.apa_monto_aplicado,
-           d.deu_estado = CASE WHEN d.deu_monto_pagado - a.apa_monto_aplicado <= 0 THEN 'PENDIENTE' ELSE 'PARCIAL' END,
            d.deu_fecha_saldada = NULL
+     WHERE a.apa_id_planilla = p_id_planilla
+       AND a.apa_id_jubilado = p_id_jubilado;
+    -- El estado se recalcula aparte: en un UPDATE de varias tablas MySQL no
+    -- garantiza el orden de las asignaciones.
+    UPDATE RPJ_PRC_DEUDA_JUBILADO d
+    INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
+       SET d.deu_estado = CASE WHEN d.deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN d.deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
      WHERE a.apa_id_planilla = p_id_planilla
        AND a.apa_id_jubilado = p_id_jubilado;
 
@@ -904,6 +925,7 @@ BEGIN
                                      WHERE d.nde_id_planilla = p_id_planilla AND d.nde_id_jubilado = i.nin_id_jubilado), 0), 0) AS liquido
           FROM RPJ_PRC_NOMINA_INGRESO i
          WHERE i.nin_id_planilla = p_id_planilla AND i.nin_tipo_manejo = 2 AND i.nin_id_jubilado IS NOT NULL
+           AND i.nin_id_beneficiario IS NULL
          GROUP BY i.nin_id_jubilado;
 
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
@@ -932,8 +954,13 @@ BEGIN
          INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
            SET d.deu_monto_pagado    = d.deu_monto_pagado - a.apa_monto_aplicado,
                d.deu_monto_pendiente = d.deu_monto_pendiente + a.apa_monto_aplicado,
-               d.deu_estado = CASE WHEN d.deu_monto_pagado - a.apa_monto_aplicado <= 0 THEN 'PENDIENTE' ELSE 'PARCIAL' END,
                d.deu_fecha_saldada = NULL
+         WHERE a.apa_id_planilla = p_id_planilla AND a.apa_id_jubilado = v_id_jub;
+        -- El estado se recalcula aparte: en un UPDATE de varias tablas MySQL no
+        -- garantiza el orden de las asignaciones.
+        UPDATE RPJ_PRC_DEUDA_JUBILADO d
+         INNER JOIN RPJ_PRC_APLICACION_PAGO a ON a.apa_id_deuda = d.deu_correlativo
+           SET d.deu_estado = CASE WHEN d.deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN d.deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
          WHERE a.apa_id_planilla = p_id_planilla AND a.apa_id_jubilado = v_id_jub;
         DELETE FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla = p_id_planilla AND apa_id_jubilado = v_id_jub;
 
@@ -962,8 +989,8 @@ BEGIN
             UPDATE RPJ_PRC_DEUDA_JUBILADO
                SET deu_monto_pagado = deu_monto_pagado + v_abono,
                    deu_monto_pendiente = deu_monto_pendiente - v_abono,
-                   deu_estado = CASE WHEN deu_monto_pendiente - v_abono <= 0 THEN 'PAGADA' ELSE 'PARCIAL' END,
-                   deu_fecha_saldada = CASE WHEN deu_monto_pendiente - v_abono <= 0 THEN CURDATE() ELSE NULL END
+                   deu_estado = CASE WHEN deu_monto_pendiente <= 0 THEN 'PAGADA' ELSE 'PARCIAL' END,
+                   deu_fecha_saldada = CASE WHEN deu_monto_pendiente <= 0 THEN CURDATE() ELSE NULL END
              WHERE deu_correlativo = v_id_deuda;
             INSERT INTO RPJ_PRC_APLICACION_PAGO
                 (apa_id_planilla, apa_id_jubilado, apa_id_deuda, apa_periodo_deuda, apa_monto_aplicado, apa_fecha_aplicacion, apa_observaciones, apa_usuario_creacion)
@@ -977,16 +1004,19 @@ BEGIN
         -- El reparto queda en el primer renglón de ingreso del jubilado.
         UPDATE RPJ_PRC_NOMINA_INGRESO
            SET nin_pago_corriente = 0, nin_abono_historico = 0
-         WHERE nin_id_planilla = p_id_planilla AND nin_id_jubilado = v_id_jub;
+         WHERE nin_id_planilla = p_id_planilla AND nin_id_jubilado = v_id_jub AND nin_id_beneficiario IS NULL;
         UPDATE RPJ_PRC_NOMINA_INGRESO
            SET nin_pago_corriente = v_pago_mes, nin_abono_historico = v_anterior, nin_id_deuda_aplicada = v_primera
-         WHERE nin_id_planilla = p_id_planilla AND nin_id_jubilado = v_id_jub
+         WHERE nin_id_planilla = p_id_planilla AND nin_id_jubilado = v_id_jub AND nin_id_beneficiario IS NULL
          ORDER BY nin_correlativo LIMIT 1;
 
         SET p_ajustados = p_ajustados + 1;
         SET v_done = FALSE;
     END LOOP loop_jub;
     CLOSE cur;
+
+    -- Beneficiarios de fallecidos: meses que se les deben y abonos.
+    CALL sp_cuadrar_beneficiarios_planilla(p_id_planilla, p_usuario);
     COMMIT;
 END$$
 DELIMITER ;
