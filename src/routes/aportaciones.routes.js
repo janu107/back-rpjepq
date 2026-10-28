@@ -6,6 +6,7 @@ const detalleController = require("../controllers/detalleAportaciones.controller
 const authMiddleware = require("../middlewares/auth.middleware");
 const { auditAction } = require("../middlewares/audit.middleware");
 const { authorizeRoles } = require("../middlewares/role.middleware");
+const { successResponse } = require("../utils/response");
 
 const router = Router();
 router.use(authMiddleware);
@@ -17,6 +18,13 @@ const upload = multer({
 });
 
 router.get("/", authorizeRoles("ADMIN", "OPERADOR"), aportacionesController.list);
+// Dashboard (antes de "/:id" para que no lo tome como id).
+router.get("/dashboard", authorizeRoles("ADMIN", "OPERADOR"), async (req, res, next) => {
+  try {
+    const data = await require("../services/aportacionesDashboard.service").dashboard(req.query.anio);
+    return successResponse(res, data, "Dashboard de aportaciones");
+  } catch (error) { next(error); }
+});
 router.get("/:id", authorizeRoles("ADMIN", "OPERADOR"), aportacionesController.getById);
 router.post("/", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "CREAR", "Creacion de aportacion"), aportacionesController.create);
 router.put("/:id", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "EDITAR", (req) => `Edicion aportacion ${req.params.id}`), aportacionesController.update);
