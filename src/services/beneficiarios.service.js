@@ -187,10 +187,12 @@ const registrarLote = async (payload, currentUser) => {
       if (b.tutora) {
         const t = b.tutora;
         await conn.execute(
+          // La tutoría empieza al registrarla (o en la fecha indicada).
           `INSERT INTO RPJ_MNT_TUTOR
-             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_usuario_creacion)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [idBen, t.nombres || "", t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null, usuario]
+             (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
+           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
+          [idBen, t.nombres || "", t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null,
+           /^\d{4}-\d{2}-\d{2}/.test(String(t.fechaInicio || "")) ? String(t.fechaInicio).slice(0, 10) : null, usuario]
         );
       }
     }
@@ -225,10 +227,11 @@ const registrarTutor = async (payload, currentUser) => {
   const usuario = currentUser?.usuario || "sistema";
   const [res] = await pool.execute(
     `INSERT INTO RPJ_MNT_TUTOR
-       (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_usuario_creacion)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_parentesco, tut_telefono, tut_fecha_inicio, tut_usuario_creacion)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?)`,
     [payload.idBeneficiario, payload.nombres || "", payload.apellidos, String(payload.dpi).trim(),
-     payload.parentesco || null, payload.telefono || null, usuario]
+     payload.parentesco || null, payload.telefono || null,
+     /^\d{4}-\d{2}-\d{2}/.test(String(payload.fechaInicio || "")) ? String(payload.fechaInicio).slice(0, 10) : null, usuario]
   );
   return { id: res.insertId };
 };
