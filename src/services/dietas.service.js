@@ -40,7 +40,8 @@ const mapPago = (r) => ({
   fechaRecibido: r.vdi_fecha_recibido,
   observaciones: r.vdi_observaciones,
   juntaNombre: `${r.jun_nombre || ""} ${r.jun_apellidos || ""}`.trim(),
-  juntaPuesto: r.jun_puesto
+  juntaPuesto: r.jun_puesto,
+  tipoJunta: r.jun_tipo_junta || null
 });
 
 const pagosDelMes = async (periodo) => {

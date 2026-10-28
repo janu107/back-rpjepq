@@ -16,7 +16,8 @@ SELECT
   d.vdi_observaciones,
   j.jun_nombre,
   j.jun_apellidos,
-  j.jun_puesto
+  j.jun_puesto,
+  j.jun_tipo_junta
 FROM RPJ_MNT_DIETA d
 LEFT JOIN RPJ_MNT_JUNTA_DIRECTIVA j ON j.jun_correlativo = d.vdi_id_junta_directiva
 WHERE d.vdi_correlativo = ?
