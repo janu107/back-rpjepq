@@ -631,22 +631,35 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
           .text(`Q ${q(g.total)}`, xb + anchoCol / 2, yb + 3.5, { width: anchoCol / 2 - 5, align: "right" });
         doc.save().rect(xb, yIni + r * (altoBloque + sepY), anchoCol, altoBanda + altoFila * 12 + altoTotal).lineWidth(0.5).stroke("#C9D3DD").restore();
       });
-      doc.y = yFin + 6;
+      // Debajo de la última fila de bloques usada en esta hoja.
+      const filasUsadas = Math.ceil(Math.min(POR_HOJA, grupos.length - inicio) / COLS);
+      doc.y = yIni + filasUsadas * (altoBloque + sepY) + 4;
     }
 
-    // Total general y nota
-    const yT = doc.y;
-    doc.save().rect(x0, yT, ancho, 16).fill("#1F4E5F").restore();
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#FFFFFF")
-      .text(`TOTAL GENERAL (${movimientos.length} aportes)`, x0 + 6, yT + 4, { width: ancho / 2 })
-      .text(`Q ${q(total)}`, x0 + ancho / 2, yT + 4, { width: ancho / 2 - 6, align: "right" });
+    // Resumen por año: aportes y total de cada año, con el total general.
+    const altoFilaR = 13;
+    const necesario = 34 + 16 + grupos.length * altoFilaR + 16 + (hayVarios ? 16 : 0);
+    if (doc.y + necesario > doc.page.height - doc.page.margins.bottom - 20) { doc.addPage(); cabecera(doc); }
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#1F4E5F").text("RESUMEN POR AÑO", x0, doc.y + 6, { width: ancho, align: "center" });
     doc.fillColor("#000000");
+    doc.moveDown(0.4);
+    const anchoR = 300;
+    const extra = Math.max(0, (ancho - anchoR) / 2);
+    const colsR = [
+      { titulo: "AÑO", campo: "anio", align: "center", ancho: anchoR * 0.25 },
+      { titulo: "APORTES", campo: "n", align: "center", ancho: anchoR * 0.25 },
+      { titulo: "TOTAL DEL AÑO", campo: "total", align: "right", ancho: anchoR * 0.5, valor: (f) => `Q ${q(f.total)}` }
+    ];
+    pdf.conMargenLateral(doc, extra, () => {
+      pdf.dibujarTabla(doc, colsR, grupos.map((g) => ({ anio: g.anio, n: g.items.length, total: g.total })),
+        { fuente: 8, alturaFila: altoFilaR, altoEncabezado: 16, reservaInferior: 30, alRepetirEncabezado: cabecera });
+      pdf.filaTotales(doc, colsR, { n: String(movimientos.length), total: `Q ${q(total)}` }, "TOTAL GENERAL", 1, { fuente: 8.5 });
+    });
     if (hayVarios) {
       doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#555555")
-        .text("(n) = aportes en el mes; se muestra la fecha del último y la suma. El detalle de cada aporte está en el Excel.", x0, yT + 20, { width: ancho });
+        .text("(n) = aportes en el mes; se muestra la fecha del último y la suma. El detalle de cada aporte está en el Excel.", x0, doc.y + 8, { width: ancho, align: "center" });
       doc.fillColor("#000000");
     }
-    doc.y = yT + 30;
   }
 
   pdf.pieDePagina(doc, user?.usuario);
