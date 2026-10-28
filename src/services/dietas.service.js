@@ -81,6 +81,16 @@ const marcarPagado = async (id, payload, currentUser) => {
     throw createError("Para emitir el pago se requiere No. documento, tipo documento, banco y fecha de pago");
   }
   if (!TIPOS_DOCUMENTO.includes(tipoDoc)) throw createError("Tipo de documento no válido");
+  // Solo se paga asistencia de sesiones APROBADAS (asistencia congelada).
+  const [sinAprobar] = await pool.execute(
+    `SELECT s.ses_acta FROM RPJ_MNT_DIETA_DET det
+       JOIN RPJ_MNT_SESION s ON s.ses_correlativo = det.die_id_sesion
+      WHERE det.die_id_dieta = ? AND s.ses_estado = 'ACTIVA' ORDER BY s.ses_fecha_sesion`,
+    [id]
+  );
+  if (sinAprobar.length) {
+    throw createError(`Primero apruebe la(s) sesión(es) ${sinAprobar.map((r) => r.ses_acta).join(", ")} en la pestaña Sesiones`, 409);
+  }
   const [res] = await pool.execute(sql("marcarPagado"), [payload.noDocumento, tipoDoc, payload.banco, payload.fechaPago, id]);
   if (res.affectedRows === 0) throw createError("El pago cambió de estado, recargue e intente de nuevo", 409);
   logger.info("Dieta emitida (PAGADO)", { id, usuario: currentUser?.usuario });

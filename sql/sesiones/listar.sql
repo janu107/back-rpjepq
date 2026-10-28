@@ -5,6 +5,9 @@ SELECT
   s.ses_fecha_sesion,
   s.ses_descripcion,
   s.ses_estado,
+  s.ses_tipo_junta,
+  s.ses_fecha_aprobacion,
+  s.ses_usuario_aprobacion,
   s.ses_fecha_creacion,
   s.ses_usuario_creacion,
   (SELECT COUNT(*) FROM RPJ_MNT_DIETA_DET det WHERE det.die_id_sesion = s.ses_correlativo) AS asistentes

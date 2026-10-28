@@ -7,7 +7,7 @@ LEFT JOIN (
          SUM(det.die_valor)  AS total
   FROM RPJ_MNT_DIETA_DET det
   INNER JOIN RPJ_MNT_SESION s
-          ON s.ses_correlativo = det.die_id_sesion AND s.ses_estado = 'ACTIVA'
+          ON s.ses_correlativo = det.die_id_sesion AND s.ses_estado IN ('ACTIVA', 'APROBADA')
   GROUP BY det.die_id_dieta
 ) agg ON agg.die_id_dieta = d.vdi_correlativo
 CROSS JOIN (SELECT par_isr FROM RPJ_CAT_PARAMETRO_GENERAL ORDER BY par_id DESC LIMIT 1) p

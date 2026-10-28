@@ -5,6 +5,9 @@ SELECT
   s.ses_fecha_sesion,
   s.ses_descripcion,
   s.ses_estado,
+  s.ses_tipo_junta,
+  s.ses_fecha_aprobacion,
+  s.ses_usuario_aprobacion,
   s.ses_fecha_creacion,
   s.ses_usuario_creacion
 FROM RPJ_MNT_SESION s

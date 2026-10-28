@@ -1,5 +1,5 @@
 -- Dietas maestro-detalle: recalcula los totales de UN encabezado (solo PENDIENTE).
--- Cuenta únicamente la asistencia de sesiones ACTIVAS (excluye ANULADAS).
+-- Cuenta la asistencia de sesiones ACTIVAS y APROBADAS (excluye ANULADAS).
 -- ISR vigente desde RPJ_CAT_PARAMETRO_GENERAL. Params: [idDieta, idDieta].
 UPDATE RPJ_MNT_DIETA d
 LEFT JOIN (
@@ -8,7 +8,7 @@ LEFT JOIN (
          SUM(det.die_valor)  AS total
   FROM RPJ_MNT_DIETA_DET det
   INNER JOIN RPJ_MNT_SESION s
-          ON s.ses_correlativo = det.die_id_sesion AND s.ses_estado = 'ACTIVA'
+          ON s.ses_correlativo = det.die_id_sesion AND s.ses_estado IN ('ACTIVA', 'APROBADA')
   WHERE det.die_id_dieta = ?
   GROUP BY det.die_id_dieta
 ) agg ON agg.die_id_dieta = d.vdi_correlativo

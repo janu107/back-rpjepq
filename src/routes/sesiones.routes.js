@@ -14,6 +14,8 @@ router.get("/:id/asistencia", ADMIN_OP, controller.getAsistencia);
 router.get("/:id", ADMIN_OP, controller.getById);
 router.post("/", ADMIN_OP, auditAction("SESIONES", "CREAR", "Registrar sesión de junta"), controller.create);
 router.put("/:id", ADMIN_OP, auditAction("SESIONES", "EDITAR", (req) => `Editar sesión ${req.params.id}`), controller.update);
+router.post("/:id/aprobar", ADMIN_OP, auditAction("SESIONES", "APROBAR", (req) => `Aprobar sesión ${req.params.id}`), controller.aprobar);
+router.post("/:id/reabrir", authorizeRoles("ADMIN"), auditAction("SESIONES", "REABRIR", (req) => `Reabrir sesión ${req.params.id}`), controller.reabrir);
 router.post("/:id/anular", ADMIN_OP, auditAction("SESIONES", "ANULAR", (req) => `Anular sesión ${req.params.id}`), controller.anular);
 
 module.exports = router;

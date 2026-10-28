@@ -8,4 +8,7 @@ const update = async (req, res, next) => { try { return successResponse(res, awa
 const anular = async (req, res, next) => { try { return successResponse(res, await service.anular(req.params.id, req.user), "Sesión anulada correctamente"); } catch (error) { next(error); } };
 const getAsistencia = async (req, res, next) => { try { return successResponse(res, await service.getAsistencia(req.params.id), "Asistencia obtenida correctamente"); } catch (error) { next(error); } };
 
-module.exports = { list, getById, create, update, anular, getAsistencia };
+const aprobar = async (req, res, next) => { try { return successResponse(res, await service.aprobar(req.params.id, req.user), "Sesión aprobada correctamente"); } catch (error) { next(error); } };
+const reabrir = async (req, res, next) => { try { return successResponse(res, await service.reabrir(req.params.id, req.user), "Sesión reabierta correctamente"); } catch (error) { next(error); } };
+
+module.exports = { list, getById, create, update, anular, aprobar, reabrir, getAsistencia };

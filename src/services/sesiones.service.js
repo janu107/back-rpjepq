@@ -12,6 +12,7 @@ const { toISODate } = require("../utils/date");
 // con die_valor = par_pago_dieta vigente. Luego se recalculan los encabezados.
 
 const MAX_SESIONES_MES = 5;
+const TIPOS_JUNTA = ["JUNTA ADMINISTRADORA", "JUNTA VIGILANCIA"];
 
 const sesionSql = (file) => getSql(`sesiones/${file}.sql`);
 const dietaSql = (file) => getSql(`dietas/${file}.sql`);
@@ -31,6 +32,9 @@ const mapSesion = (row) => ({
   fechaSesion: toISODate(row.ses_fecha_sesion),
   descripcion: row.ses_descripcion,
   estado: row.ses_estado,
+  tipoJunta: row.ses_tipo_junta || null,
+  fechaAprobacion: row.ses_fecha_aprobacion || null,
+  usuarioAprobacion: row.ses_usuario_aprobacion || null,
   asistentes: num(row.asistentes),
   fechaCreacion: row.ses_fecha_creacion,
   usuarioCreacion: row.ses_usuario_creacion
@@ -65,6 +69,33 @@ const validate = (payload) => {
   if (!payload.acta || String(payload.acta).trim() === "") throw createError("El acta es obligatoria");
   if (!payload.fechaSesion) throw createError("La fecha de la sesión es obligatoria");
   if (Number.isNaN(Date.parse(payload.fechaSesion))) throw createError("Fecha de sesión inválida");
+};
+
+// Tipo de junta de la sesión. Obligatorio en sesiones nuevas; las sesiones
+// registradas antes de este cambio pueden quedar sin tipo (asistencia mixta).
+const tipoJuntaDe = (payload, obligatorio) => {
+  const t = String(payload.tipoJunta || "").trim().toUpperCase();
+  if (!t) {
+    if (obligatorio) throw createError("Seleccione la junta (ADMINISTRADORA o VIGILANCIA)");
+    return null;
+  }
+  if (!TIPOS_JUNTA.includes(t)) throw createError("Tipo de junta no válido");
+  return t;
+};
+
+// Los asistentes deben pertenecer a la junta de la sesión.
+const validarAsistentesJunta = async (conn, asistentes, tipoJunta) => {
+  if (!tipoJunta) return;
+  const ids = (Array.isArray(asistentes) ? asistentes : []).map(Number).filter((x) => x > 0);
+  if (!ids.length) return;
+  const [rows] = await conn.query(
+    "SELECT jun_nombre, jun_apellidos, jun_tipo_junta FROM RPJ_MNT_JUNTA_DIRECTIVA WHERE jun_correlativo IN (?) AND COALESCE(jun_tipo_junta, '') <> ?",
+    [ids, tipoJunta]
+  );
+  if (rows.length) {
+    const r = rows[0];
+    throw createError(`${`${r.jun_nombre || ""} ${r.jun_apellidos || ""}`.trim()} no pertenece a la ${tipoJunta}`, 400);
+  }
 };
 
 // Asegura el encabezado PENDIENTE del miembro para el periodo (find-or-create).
@@ -112,6 +143,7 @@ const syncAsistencia = async (conn, sesionId, periodo, asistentes, pagoDieta, us
 
 const create = async (payload, currentUser) => {
   validate(payload);
+  const tipoJunta = tipoJuntaDe(payload, true);
   const usuario = currentUser?.usuario || "sistema";
   const periodo = periodoDeFecha(payload.fechaSesion);
   const { pagoDieta } = await getParametros();
@@ -121,18 +153,20 @@ const create = async (payload, currentUser) => {
     await conn.beginTransaction();
 
     // Validaciones dentro de la transacción (acta única respaldada por UNIQUE;
-    // máx 5 sesiones ACTIVAS por mes es regla de negocio).
+    // máx 5 sesiones por mes y por junta es regla de negocio).
     const [dup] = await conn.execute(sesionSql("buscarActa"), [payload.acta, 0]);
     if (dup.length) throw createError("YA EXISTE UNA SESIÓN CON ESA ACTA", 409);
-    const [cnt] = await conn.execute(sesionSql("contarMes"), [periodo, 0]);
+    const [cnt] = await conn.execute(sesionSql("contarMes"), [periodo, 0, tipoJunta, tipoJunta]);
     if (num(cnt[0]?.total) >= MAX_SESIONES_MES) {
-      throw createError(`No se permiten más de ${MAX_SESIONES_MES} sesiones por mes`, 409);
+      throw createError(`No se permiten más de ${MAX_SESIONES_MES} sesiones por mes para la ${tipoJunta}`, 409);
     }
+    await validarAsistentesJunta(conn, payload.asistentes, tipoJunta);
 
     const [res] = await conn.execute(sesionSql("crear"), [
       String(payload.acta).toUpperCase(),
       payload.fechaSesion,
       payload.descripcion ? String(payload.descripcion).toUpperCase() : null,
+      tipoJunta,
       usuario
     ]);
     const sesionId = res.insertId;
@@ -154,7 +188,10 @@ const update = async (id, payload, currentUser) => {
   const usuario = currentUser?.usuario || "sistema";
   const periodo = periodoDeFecha(payload.fechaSesion);
   const existing = await getById(id);
+  if (existing.estado === "APROBADA") throw createError("La sesión está APROBADA: su asistencia ya no se puede modificar", 409);
   if (existing.estado !== "ACTIVA") throw createError("Solo se pueden editar sesiones ACTIVAS", 409);
+  // Una sesión que ya tiene junta no la pierde; las antiguas pueden quedar sin junta.
+  const tipoJunta = tipoJuntaDe(payload, Boolean(existing.tipoJunta));
 
   const { pagoDieta } = await getParametros();
 
@@ -164,15 +201,17 @@ const update = async (id, payload, currentUser) => {
 
     const [dup] = await conn.execute(sesionSql("buscarActa"), [payload.acta, id]);
     if (dup.length) throw createError("YA EXISTE UNA SESIÓN CON ESA ACTA", 409);
-    const [cnt] = await conn.execute(sesionSql("contarMes"), [periodo, id]);
+    const [cnt] = await conn.execute(sesionSql("contarMes"), [periodo, id, tipoJunta, tipoJunta]);
     if (num(cnt[0]?.total) >= MAX_SESIONES_MES) {
-      throw createError(`No se permiten más de ${MAX_SESIONES_MES} sesiones por mes`, 409);
+      throw createError(`No se permiten más de ${MAX_SESIONES_MES} sesiones por mes${tipoJunta ? ` para la ${tipoJunta}` : ""}`, 409);
     }
+    await validarAsistentesJunta(conn, payload.asistentes, tipoJunta);
 
     await conn.execute(sesionSql("actualizar"), [
       String(payload.acta).toUpperCase(),
       payload.fechaSesion,
       payload.descripcion ? String(payload.descripcion).toUpperCase() : null,
+      tipoJunta,
       id
     ]);
     await syncAsistencia(conn, id, periodo, payload.asistentes, pagoDieta, usuario);
@@ -193,6 +232,7 @@ const update = async (id, payload, currentUser) => {
 const anular = async (id, currentUser) => {
   const existing = await getById(id);
   if (existing.estado === "ANULADA") throw createError("La sesión ya está anulada", 409);
+  if (existing.estado === "APROBADA") throw createError("La sesión está APROBADA. Para anularla primero debe reabrirla (administrador).", 409);
 
   const conn = await pool.getConnection();
   try {
@@ -236,4 +276,38 @@ const getAsistencia = async (id) => {
   }));
 };
 
-module.exports = { list, getById, create, update, anular, getAsistencia };
+// Aprobar: congela la asistencia (ya no se puede editar ni anular) y habilita
+// emitir el pago de los asistentes.
+const aprobar = async (id, currentUser) => {
+  const existing = await getById(id);
+  if (existing.estado !== "ACTIVA") throw createError(`Solo se aprueban sesiones ACTIVAS (esta está ${existing.estado})`, 409);
+  if (!existing.asistentesIds.length) throw createError("La sesión no tiene asistentes registrados", 409);
+  const usuario = currentUser?.usuario || "sistema";
+  const [res] = await pool.execute(
+    "UPDATE RPJ_MNT_SESION SET ses_estado = 'APROBADA', ses_fecha_aprobacion = NOW(), ses_usuario_aprobacion = ? WHERE ses_correlativo = ? AND ses_estado = 'ACTIVA'",
+    [usuario, id]
+  );
+  if (res.affectedRows === 0) throw createError("La sesión cambió de estado, recargue e intente de nuevo", 409);
+  logger.info("Sesión de dietas aprobada", { sesionId: id, usuario, asistentes: existing.asistentesIds.length });
+  return getById(id);
+};
+
+// Reabrir (solo administrador): vuelve a ACTIVA para corregir la asistencia,
+// siempre que no se haya emitido el pago de ninguno de sus asistentes.
+const reabrir = async (id, currentUser) => {
+  const existing = await getById(id);
+  if (existing.estado !== "APROBADA") throw createError("Solo se reabren sesiones APROBADAS", 409);
+  const [asis] = await pool.execute(sesionSql("asistenciaSesion"), [id]);
+  const cerrado = asis.find((a) => a.vdi_estado && a.vdi_estado !== "PENDIENTE");
+  if (cerrado) {
+    throw createError(`No se puede reabrir: el pago de ${`${cerrado.jun_nombre || ""} ${cerrado.jun_apellidos || ""}`.trim()} ya está ${cerrado.vdi_estado}.`, 409);
+  }
+  await pool.execute(
+    "UPDATE RPJ_MNT_SESION SET ses_estado = 'ACTIVA', ses_fecha_aprobacion = NULL, ses_usuario_aprobacion = NULL WHERE ses_correlativo = ? AND ses_estado = 'APROBADA'",
+    [id]
+  );
+  logger.info("Sesión de dietas reabierta", { sesionId: id, usuario: currentUser?.usuario });
+  return getById(id);
+};
+
+module.exports = { list, getById, create, update, anular, aprobar, reabrir, getAsistencia };
