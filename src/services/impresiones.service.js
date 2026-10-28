@@ -575,8 +575,8 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
     }
   } else {
     // ---- Detalle tipo calendario: bloques iguales por año (12 meses), 3 x 3 por hoja ----
-    // Se lee por columnas: la primera tiene los 3 primeros años, la segunda los
-    // 3 siguientes, etc. Un mes con varios aportes muestra la suma y (n).
+    // Se lee por filas, como un calendario: 2008 2009 2010 / 2011 2012 2013 / ...
+    // Un mes con varios aportes muestra la suma y (n).
     const MESES_C = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
     const COLS = 3; const FILAS = 3; const POR_HOJA = COLS * FILAS;
     const sepX = 14; const sepY = 10;
@@ -595,7 +595,7 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
       const fuente = altoFila < 10.5 ? 6.8 : 7.5;
 
       grupos.slice(inicio, inicio + POR_HOJA).forEach((g, i) => {
-        const c = Math.floor(i / FILAS); const r = i % FILAS;
+        const c = i % COLS; const r = Math.floor(i / COLS);
         const xb = x0 + c * (anchoCol + sepX);
         let yb = yIni + r * (altoBloque + sepY);
         // Banda del año
