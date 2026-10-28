@@ -574,80 +574,79 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
       doc.fillColor("#000000");
     }
   } else {
-    // ---- Detalle agrupado por año, en 3 columnas (bloques de arriba abajo) ----
-    const COLS = 3; const sep = 14;
-    const anchoCol = (ancho - sep * (COLS - 1)) / COLS;
-    const aNo = anchoCol * 0.16; const aFecha = anchoCol * 0.42; const aMonto = anchoCol - aNo - aFecha;
-    const alto = 12; const altoBanda = 15; const altoSub = 13;
+    // ---- Detalle tipo calendario: bloques iguales por año (12 meses), 3 x 3 por hoja ----
+    // Se lee por columnas: la primera tiene los 3 primeros años, la segunda los
+    // 3 siguientes, etc. Un mes con varios aportes muestra la suma y (n).
+    const MESES_C = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+    const COLS = 3; const FILAS = 3; const POR_HOJA = COLS * FILAS;
+    const sepX = 14; const sepY = 10;
+    const anchoCol = (ancho - sepX * (COLS - 1)) / COLS;
+    const aMes = anchoCol * 0.20; const aFecha = anchoCol * 0.42; const aMonto = anchoCol - aMes - aFecha;
     const grupos = agruparPorAnio(movimientos);
-    let numero = 0;
-    const filas = [];
-    grupos.forEach((g) => {
-      filas.push({ tipo: "banda", g });
-      g.items.forEach((m) => { numero += 1; filas.push({ tipo: "item", no: numero, m, g }); });
-      filas.push({ tipo: "sub", g });
-    });
+    let hayVarios = false;
 
-    const yTope = () => doc.y;
-    let col = 0; let yIni = yTope(); let y2 = yIni;
-    const limite = () => doc.page.height - doc.page.margins.bottom - 34;
-    const xCol = () => x0 + col * (anchoCol + sep);
-    const nuevaColumna = () => {
-      col += 1;
-      if (col >= COLS) { doc.addPage(); cabecera(doc); col = 0; yIni = doc.y; }
-      y2 = yIni;
-    };
-    const altoDe = (f) => (f.tipo === "banda" ? altoBanda : f.tipo === "sub" ? altoSub : alto);
+    for (let inicio = 0; inicio < grupos.length; inicio += POR_HOJA) {
+      if (inicio > 0) { doc.addPage(); cabecera(doc); }
+      const yIni = doc.y;
+      const yFin = doc.page.height - doc.page.margins.bottom - 52;
+      const altoBloque = (yFin - yIni - sepY * (FILAS - 1)) / FILAS;
+      const altoBanda = 15; const altoTotal = 14;
+      const altoFila = Math.min(13, (altoBloque - altoBanda - altoTotal) / 12);
+      const fuente = altoFila < 10.5 ? 6.8 : 7.5;
 
-    filas.forEach((f, idx) => {
-      // Una banda de año no queda sola al pie: necesita al menos 2 renglones debajo.
-      const necesita = f.tipo === "banda" ? altoBanda + alto * 2 : altoDe(f);
-      if (y2 + necesita > limite()) {
-        nuevaColumna();
-        if (f.tipo !== "banda") {
-          // Continúa un año en la columna nueva: se repite la banda.
-          const xb = xCol();
-          doc.save().rect(xb, y2, anchoCol, altoBanda).fill("#1F4E5F").restore();
-          doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#FFFFFF").text(`${f.g.anio} (cont.)`, xb + 4, y2 + 4, { width: anchoCol - 8 });
-          y2 += altoBanda;
-        }
-      }
-      const xb = xCol();
-      if (f.tipo === "banda") {
-        doc.save().rect(xb, y2, anchoCol, altoBanda).fill("#1F4E5F").restore();
-        doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF")
-          .text(`${f.g.anio}`, xb + 4, y2 + 4, { width: anchoCol / 2 })
-          .font("Helvetica").fontSize(7)
-          .text(`${f.g.items.length} aporte(s)`, xb + anchoCol / 2, y2 + 4.5, { width: anchoCol / 2 - 4, align: "right" });
-        y2 += altoBanda;
-      } else if (f.tipo === "item") {
-        const par = (idx % 2) === 0;
-        if (par) doc.save().rect(xb, y2, anchoCol, alto).fill("#F3F5F8").restore();
-        doc.font("Helvetica").fontSize(7.5).fillColor("#000000");
-        doc.text(String(f.no), xb + 2, y2 + 3, { width: aNo - 4, align: "right" });
-        doc.text(fecha(f.m.fecha_pago), xb + aNo, y2 + 3, { width: aFecha, align: "center" });
-        doc.text(`Q ${q(f.m.monto)}`, xb + aNo + aFecha, y2 + 3, { width: aMonto - 4, align: "right" });
-        y2 += alto;
-      } else {
-        doc.save().rect(xb, y2, anchoCol, altoSub).fill("#DDE3EA").restore();
+      grupos.slice(inicio, inicio + POR_HOJA).forEach((g, i) => {
+        const c = Math.floor(i / FILAS); const r = i % FILAS;
+        const xb = x0 + c * (anchoCol + sepX);
+        let yb = yIni + r * (altoBloque + sepY);
+        // Banda del año
+        doc.save().rect(xb, yb, anchoCol, altoBanda).fill("#1F4E5F").restore();
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#FFFFFF").text(String(g.anio), xb + 5, yb + 4, { width: anchoCol / 2 });
+        doc.font("Helvetica").fontSize(7).text(`${g.items.length} aporte(s)`, xb + anchoCol / 2, yb + 4.5, { width: anchoCol / 2 - 5, align: "right" });
+        yb += altoBanda;
+        // Meses
+        const porMes = Array.from({ length: 12 }, () => ({ v: 0, n: 0, ultima: null }));
+        g.items.forEach((m) => {
+          const d = new Date(m.fecha_pago); const k = d.getMonth();
+          porMes[k].v = Math.round((porMes[k].v + Number(m.monto || 0)) * 100) / 100; porMes[k].n += 1; porMes[k].ultima = m.fecha_pago;
+        });
+        porMes.forEach((pm, k) => {
+          const yy = yb + k * altoFila;
+          if (k % 2 === 1) doc.save().rect(xb, yy, anchoCol, altoFila).fill("#F3F5F8").restore();
+          const ty = yy + (altoFila - fuente) / 2;
+          doc.font("Helvetica-Bold").fontSize(fuente).fillColor(pm.n ? "#1F4E5F" : "#9AA5B1").text(MESES_C[k], xb + 5, ty, { width: aMes - 5 });
+          if (pm.n) {
+            if (pm.n > 1) hayVarios = true;
+            doc.font("Helvetica").fontSize(fuente).fillColor("#000000")
+              .text(`${fecha(pm.ultima)}${pm.n > 1 ? ` (${pm.n})` : ""}`, xb + aMes, ty, { width: aFecha, align: "center" })
+              .text(`Q ${q(pm.v)}`, xb + aMes + aFecha, ty, { width: aMonto - 5, align: "right" });
+          } else {
+            doc.font("Helvetica").fontSize(fuente).fillColor("#B0B8C1").text("—", xb + aMes, ty, { width: aFecha, align: "center" });
+          }
+        });
+        yb += altoFila * 12;
+        // Total del año
+        doc.save().rect(xb, yb, anchoCol, altoTotal).fill("#DDE3EA").restore();
         doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#000000")
-          .text(`TOTAL ${f.g.anio}`, xb + 4, y2 + 3.5, { width: anchoCol / 2 })
-          .text(`Q ${q(f.g.total)}`, xb + anchoCol / 2, y2 + 3.5, { width: anchoCol / 2 - 4, align: "right" });
-        y2 += altoSub + 6;
-      }
-    });
+          .text(`TOTAL ${g.anio}`, xb + 5, yb + 3.5, { width: anchoCol / 2 })
+          .text(`Q ${q(g.total)}`, xb + anchoCol / 2, yb + 3.5, { width: anchoCol / 2 - 5, align: "right" });
+        doc.save().rect(xb, yIni + r * (altoBloque + sepY), anchoCol, altoBanda + altoFila * 12 + altoTotal).lineWidth(0.5).stroke("#C9D3DD").restore();
+      });
+      doc.y = yFin + 6;
+    }
 
-    doc.x = x0;
-    let yT = (col === 0 ? y2 : Math.max(y2, yIni)) + 4;
-    // El total general va debajo de la columna más baja de la hoja actual.
-    yT = Math.max(yT, y2 + 4);
-    if (yT + 18 > doc.page.height - doc.page.margins.bottom - 20) { doc.addPage(); cabecera(doc); yT = doc.y; }
+    // Total general y nota
+    const yT = doc.y;
     doc.save().rect(x0, yT, ancho, 16).fill("#1F4E5F").restore();
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#FFFFFF")
       .text(`TOTAL GENERAL (${movimientos.length} aportes)`, x0 + 6, yT + 4, { width: ancho / 2 })
       .text(`Q ${q(total)}`, x0 + ancho / 2, yT + 4, { width: ancho / 2 - 6, align: "right" });
     doc.fillColor("#000000");
-    doc.y = yT + 20;
+    if (hayVarios) {
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#555555")
+        .text("(n) = aportes en el mes; se muestra la fecha del último y la suma. El detalle de cada aporte está en el Excel.", x0, yT + 20, { width: ancho });
+      doc.fillColor("#000000");
+    }
+    doc.y = yT + 30;
   }
 
   pdf.pieDePagina(doc, user?.usuario);
