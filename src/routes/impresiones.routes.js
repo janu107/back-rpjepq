@@ -11,6 +11,16 @@ router.use(authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"));
 
 router.get("/opciones", controller.opciones);
 
+// --- Depósitos por banco y tipo de jubilación (planilla de jubilados) ---------
+router.get("/depositos-banco/planillas", controller.depositosPlanillas);
+router.get("/depositos-banco/:idPlanilla", controller.depositosPreview);
+router.get("/depositos-banco/:idPlanilla/pdf",
+  auditAction("IMPRESIONES", "DEPOSITOS_BANCO_PDF", (req) => `Imprimir depósitos por banco de la planilla ${req.params.idPlanilla}`),
+  controller.depositosPdf);
+router.get("/depositos-banco/:idPlanilla/excel",
+  auditAction("IMPRESIONES", "DEPOSITOS_BANCO_EXCEL", (req) => `Exportar depósitos por banco de la planilla ${req.params.idPlanilla}`),
+  controller.depositosExcel);
+
 // --- Vistas previas en pantalla (JSON) --------------------------------------
 router.get("/nomina-sueldos/:idPlanilla", controller.previewNominaSueldos);
 router.get("/nomina-tiempo-extra/:idPlanilla", controller.previewNominaTiempoExtra);

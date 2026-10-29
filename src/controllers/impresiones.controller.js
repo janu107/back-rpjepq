@@ -38,7 +38,20 @@ const pdfNominaJubilados = async (req, res, next) => { try { return enviarPdf(re
 const pdfResumenJubilados = async (req, res, next) => { try { return enviarPdf(res, await service.pdfResumenJubilados(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
 const pdfNominaPrestamos = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaPrestamos(req.query, req.user)); } catch (e) { next(e); } };
 
+// --- Depósitos por banco (planilla de jubilados) -----------------------------
+const depositos = require("../services/depositosBanco.service");
+const enviarArchivo = (res, { buffer, filename }, tipo) => {
+  res.setHeader("Content-Type", tipo);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(buffer);
+};
+const depositosPlanillas = async (req, res, next) => { try { return successResponse(res, await depositos.planillas(), "Planillas de jubilados"); } catch (e) { next(e); } };
+const depositosPreview = async (req, res, next) => { try { const d = await depositos.getDepositos(req.params.idPlanilla, req.query); return successResponse(res, { planilla: d.planilla, bancos: d.bancos, tipos: d.tipos, matriz: d.matriz, totalBanco: d.totalBanco, total: d.total, depositos: d.filas.length }, "Depósitos por banco"); } catch (e) { next(e); } };
+const depositosPdf = async (req, res, next) => { try { return enviarPdf(res, await depositos.pdfDepositos(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
+const depositosExcel = async (req, res, next) => { try { return enviarArchivo(res, await depositos.excelDepositos(req.params.idPlanilla, req.query), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
+
 module.exports = {
+  depositosPlanillas, depositosPreview, depositosPdf, depositosExcel,
   opciones,
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,
   previewEstadoAportaciones, previewNominaJubilados, previewResumenJubilados,
