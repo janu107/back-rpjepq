@@ -870,7 +870,7 @@ const periodoAplicado = (f) => {
 const LETRA_JUB = 7.5;
 
 const COLS_JUBILADOS = (doc) => {
-  const anchos = pdf.repartirAnchos(doc, [5, 24, 11, 8, 10, 8, 8, 8, 8, 8, 8, 11, 10]);
+  const anchos = pdf.repartirAnchos(doc, [5, 27, 11, 8, 10, 8, 8, 8, 8, 8, 8, 10, 10]);
   const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
   return [
     c("COD", "codigo", "right", 0),
@@ -916,6 +916,33 @@ const agruparPorTipoJubilacion = (filas) => {
   });
 };
 
+// Viudez / orfandad: cada jubilado fallecido va como encabezado y debajo sus
+// beneficiarios; para cada menor, primero su tutora y después el huérfano.
+// Los jubilados vivos (o pensionados de ese tipo sin fallecido) quedan igual.
+const filasConFallecidos = (filas) => {
+  const propios = filas.filter((f) => !Number(f.es_beneficiario));
+  const ben = filas.filter((f) => Number(f.es_beneficiario));
+  if (!ben.length) return filas;
+  const orden = { ESPOSA: 0, HIJO_INVALIDEZ: 1, HIJO: 2 };
+  ben.sort((a, b) => String(a.nombre_fallecido).localeCompare(String(b.nombre_fallecido))
+    || (orden[a.parentesco] ?? 9) - (orden[b.parentesco] ?? 9)
+    || String(a.nombre_beneficiario).localeCompare(String(b.nombre_beneficiario)));
+  const salida = [...propios];
+  let actual = null;
+  ben.forEach((f) => {
+    if (f.id_jubilado !== actual) {
+      actual = f.id_jubilado;
+      salida.push({
+        _titulo: `${f.codigo}  ${f.nombre_fallecido}  —  JUBILADO FALLECIDO${f.fecha_fallecimiento ? ` EL ${fecha(f.fecha_fallecimiento)}` : ""}`,
+        _negrita: true, _fondo: "#E8EEF4", _color: "#1F4E5F"
+      });
+    }
+    if (f.nombre_tutor) salida.push({ _titulo: `TUTORA: ${f.nombre_tutor}`, _sangria: 10, _color: "#444444" });
+    salida.push({ ...f, codigo: "", nombre: f.nombre_beneficiario, _sangrias: { nombre: f.nombre_tutor ? 14 : 8 } });
+  });
+  return salida;
+};
+
 const pdfNominaJubilados = async (idPlanilla, opciones = {}, user) => {
   const { planilla, filas, tipoJubilacion } = await getNominaJubilados(idPlanilla, opciones);
   if (!filas.length) {
@@ -948,7 +975,7 @@ const pdfNominaJubilados = async (idPlanilla, opciones = {}, user) => {
       doc.font("Helvetica-Bold").fontSize(9).text(`PENSION: ${tipo}`);
       doc.moveDown(0.15);
     }
-    pdf.dibujarTabla(doc, columnas, filasTipo, { fuente: LETRA_JUB, alturaFila: 13, altoEncabezado: 22, reservaInferior: 70, alRepetirEncabezado: cabecera });
+    pdf.dibujarTabla(doc, columnas, filasConFallecidos(filasTipo), { fuente: LETRA_JUB, alturaFila: 13, altoEncabezado: 22, reservaInferior: 70, alRepetirEncabezado: cabecera });
     pdf.filaTotales(doc, columnas, totalesJubilados(filasTipo), porTipo ? `TOTAL ${tipo}` : "TOTAL DE PENSIONES", 2, { fuente: LETRA_JUB });
   });
 

@@ -39,7 +39,13 @@ SELECT
                   WHERE a.apa_id_planilla = ing.nin_id_planilla AND a.apa_id_deuda = deu.deu_correlativo)
       THEN IF(deu.deu_monto_pendiente <= 0, 100, 50)
     ELSE IF(COALESCE(ing.pension_mensual, 0) - COALESCE(des.total_descuentos, 0) >= deu.deu_monto_pendiente, 100, 50)
-  END                                         AS pct_periodo
+  END                                         AS pct_periodo,
+  0                                           AS es_beneficiario,
+  NULL                                        AS nombre_fallecido,
+  NULL                                        AS fecha_fallecimiento,
+  NULL                                        AS nombre_beneficiario,
+  NULL                                        AS nombre_tutor,
+  NULL                                        AS parentesco
 FROM RPJ_MNT_JUBILADO j
 INNER JOIN (
   SELECT nin_id_jubilado, MAX(nin_id_planilla) AS nin_id_planilla, SUM(nin_valor) AS pension_mensual,
@@ -98,7 +104,14 @@ SELECT
            THEN IF(deu.deu_monto_pendiente <= 0, 100, 50)
            ELSE IF(i.nin_valor >= deu.deu_monto_pendiente, 100, 50) END
     ELSE pla.ppl_porcentaje_pago
-  END
+  END,
+  1,
+  CONCAT(j.jub_nombres, ' ', j.jub_apellidos),
+  j.jub_fecha_fallecimiento,
+  TRIM(CONCAT(COALESCE(b.ben_nombres, ''), ' ', b.ben_apellidos)),
+  IF(tut.tut_correlativo IS NOT NULL AND TIMESTAMPDIFF(YEAR, b.ben_fecha_nacimiento, pla.ppl_fecha_inicio) < 18,
+     TRIM(CONCAT(COALESCE(tut.tut_nombres, ''), ' ', tut.tut_apellidos)), NULL),
+  b.ben_tipo_parentesco
 FROM RPJ_PRC_NOMINA_INGRESO i
 JOIN RPJ_MNT_BENEFICIARIO b ON b.ben_correlativo = i.nin_id_beneficiario
 JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = i.nin_id_jubilado

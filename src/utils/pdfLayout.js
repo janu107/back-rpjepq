@@ -113,13 +113,26 @@ const dibujarTabla = (doc, columnas, filas, opciones = {}) => {
       pintarEncabezado();
     }
     const y = doc.y;
+    // Fila de encabezado dentro de la tabla (ej. el jubilado fallecido sobre sus
+    // beneficiarios): texto a todo el ancho, sin montos.
+    if (fila && fila._titulo) {
+      if (fila._fondo) doc.save().rect(x0, y, anchoTabla, alturaFila).fill(fila._fondo).restore();
+      doc.font(fila._negrita ? "Helvetica-Bold" : "Helvetica").fontSize(fuente).fillColor(fila._color || "#000000")
+        .text(String(fila._titulo), x0 + 4 + (fila._sangria || 0), y + 3,
+          { width: anchoTabla - 8 - (fila._sangria || 0), lineBreak: false, ellipsis: true });
+      doc.fillColor("#000000");
+      doc.y = y + alturaFila;
+      return;
+    }
     if (i % 2 === 1) doc.save().rect(x0, y, anchoTabla, alturaFila).fill("#F3F6F8").restore();
     let x = x0;
     doc.font("Helvetica").fontSize(fuente).fillColor("#000000");
     columnas.forEach((c) => {
       const valor = c.valor ? c.valor(fila) : fila[c.campo];
+      // _sangrias: { campo: puntos } corre el texto de esa columna a la derecha.
+      const sangria = (fila && fila._sangrias && fila._sangrias[c.campo]) || 0;
       doc.text(valor === null || valor === undefined ? "" : String(valor),
-        x + 2, y + 3, { width: c.ancho - 4, align: c.align || "left", lineBreak: false, ellipsis: true });
+        x + 2 + sangria, y + 3, { width: c.ancho - 4 - sangria, height: alturaFila - 2, align: c.align || "left", lineBreak: false, ellipsis: true });
       x += c.ancho;
     });
     doc.y = y + alturaFila;
