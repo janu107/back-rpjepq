@@ -9,7 +9,10 @@ const { createError } = require("../utils/planillaEstado");
 // SQL en línea (el módulo es nuevo y autocontenido).
 // ============================================================================
 
-const PARENTESCOS = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ"];
+// ESPOSA, HIJO e HIJO_INVALIDEZ cobran en la planilla; los demás por ahora solo
+// se registran (todavía sin regla de pago).
+const PARENTESCOS = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ", "ESPOSO", "CONVIVIENTE", "HERMANO", "HERMANA", "SOBRINO", "SOBRINA",
+  "TIO", "TIA", "PRIMO", "PRIMA", "ABUELO", "ABUELA", "NIETO", "NIETA", "AMIGO", "VECINO", "OTRO"];
 const toNum = (v) => Number(v || 0);
 
 // Edad cumplida a partir de la fecha de nacimiento.
@@ -140,7 +143,7 @@ const getByJubilado = async (idJubilado) => {
 const validarBeneficiario = (b, idx) => {
   const etiqueta = `Beneficiario #${idx + 1}`;
   if (!PARENTESCOS.includes(String(b.tipoParentesco || "").toUpperCase())) {
-    throw createError(`${etiqueta}: parentesco no válido (ESPOSA, HIJO o HIJO_INVALIDEZ)`);
+    throw createError(`${etiqueta}: parentesco no válido`);
   }
   if (!b.apellidos || String(b.apellidos).trim() === "") throw createError(`${etiqueta}: los apellidos son obligatorios`);
   if (!esDpiValido(b.dpi)) throw createError(`${etiqueta}: el DPI debe tener 13 dígitos`);

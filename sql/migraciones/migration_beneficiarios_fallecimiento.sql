@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS RPJ_PRC_APLICACION_PAGO_BEN (
   CONSTRAINT fk_apb_planilla FOREIGN KEY (apb_id_planilla) REFERENCES RPJ_CAT_PARAMETRO_PLANILLA (ppl_correlativo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Parentesco abierto: además de ESPOSA, HIJO e HIJO_INVALIDEZ se pueden registrar
+-- otros (hermano, sobrino, tío, abuelo, amigo...). Por ahora solo cobran esposa
+-- e hijos; los demás quedan registrados hasta definir su regla.
+ALTER TABLE RPJ_MNT_BENEFICIARIO MODIFY ben_tipo_parentesco VARCHAR(30) NOT NULL;
+
 -- Datos de pago: cuenta de la esposa / beneficiario mayor y de la tutora (a
 -- quien se le deposita lo de los menores).
 SET @existe := (SELECT COUNT(*) FROM information_schema.COLUMNS
@@ -181,6 +186,9 @@ BEGIN
                 SET v_teorico  = v_debe;
                 SET v_monto    = ROUND(v_debe * v_porcentaje / 100, 2);
             END IF;
+        ELSEIF v_parentesco NOT IN ('HIJO', 'HIJO_INVALIDEZ') THEN
+            -- Otros parentescos: solo registro, todavía sin regla de pago.
+            SET v_concepto = NULL;
         ELSEIF v_parentesco = 'HIJO' AND TIMESTAMPDIFF(YEAR, v_fnac, v_fecha_ini) >= 18 THEN
             -- Ya es mayor de edad: se le paga de una vez lo que se le debe.
             SELECT COALESCE(SUM(dbe_monto_pendiente), 0) INTO v_monto

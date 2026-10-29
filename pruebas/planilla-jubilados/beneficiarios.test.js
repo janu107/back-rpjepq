@@ -38,7 +38,8 @@ const eq = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   await c.query(`INSERT INTO RPJ_MNT_BENEFICIARIO (ben_correlativo, ben_id_jubilado, ben_tipo_parentesco, ben_nombres, ben_apellidos, ben_dpi, ben_fecha_nacimiento, ben_porcentaje, ben_estado, ben_fecha_registro, ben_usuario_creacion) VALUES
     (901, 1, 'ESPOSA', 'MARIA', 'PEREZ', '9000000000101', '1960-01-01', 50, 'REGISTRADO', CURDATE(), 'prueba'),
     (902, 1, 'HIJO', 'NENE', 'PEREZ', '9000000000102', '2015-05-05', 25, 'REGISTRADO', CURDATE(), 'prueba'),
-    (903, 1, 'HIJO', 'GRANDE', 'PEREZ', '9000000000103', ?, 25, 'REGISTRADO', CURDATE(), 'prueba')`, [nac18]);
+    (903, 1, 'HIJO', 'GRANDE', 'PEREZ', '9000000000103', ?, 25, 'REGISTRADO', CURDATE(), 'prueba'),
+    (904, 1, 'HERMANO', 'TIO', 'PEREZ', '9000000000104', '1950-01-01', 10, 'REGISTRADO', CURDATE(), 'prueba')`, [nac18]);
   await c.query(`INSERT INTO RPJ_MNT_TUTOR (tut_id_beneficiario, tut_nombres, tut_apellidos, tut_dpi, tut_fecha_inicio, tut_usuario_creacion) VALUES
     (902, 'MARIA', 'PEREZ', '9000000000101', CURDATE(), 'prueba'), (903, 'MARIA', 'PEREZ', '9000000000101', CURDATE(), 'prueba')`);
 
@@ -48,7 +49,7 @@ const eq = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   ok(fallo && /beneficiarios|pension/i.test(fallo), "no se registra el fallecimiento sin beneficiarios o sin pensión");
   await c.query("CALL sp_registrar_fallecimiento_jubilado(1, ?, 'DEF-1', 'prueba', @a, @b)", [ymd(new Date(hoy.getFullYear(), hoy.getMonth(), 5))]);
   const [[act]] = await c.query("SELECT COUNT(*) n FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado=1 AND ben_estado='ACTIVO'");
-  ok(act.n === 3, "los 3 beneficiarios quedan ACTIVOS");
+  ok(act.n === 4, "los 4 beneficiarios quedan ACTIVOS");
 
   const filas = async (pla) => q("SELECT nin_id_beneficiario b, nin_puesto concepto, nin_valor v, nin_valor_teorico t FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=? AND nin_id_beneficiario IS NOT NULL ORDER BY b", [pla]);
   const deudaBen = async (b) => q("SELECT dbe_periodo p, dbe_monto_original o, dbe_monto_pagado pg, dbe_monto_pendiente pend, dbe_estado e FROM RPJ_PRC_DEUDA_BENEFICIARIO WHERE dbe_id_beneficiario=? ORDER BY dbe_periodo", [b]);
@@ -64,7 +65,8 @@ const eq = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   let f = await filas(900);
   const [[juan]] = await c.query("SELECT COUNT(*) n FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla=900 AND nin_id_jubilado=1 AND nin_id_beneficiario IS NULL");
   ok(juan.n === 0, "Juan (fallecido) ya no entra a la nómina");
-  ok(f.length === 3, "entran los 3 beneficiarios");
+  ok(f.length === 3, "entran los 3 beneficiarios que cobran");
+  ok(!f.some((x) => x.b === 904), "el HERMANO (parentesco sin regla de pago) queda registrado pero no entra a la planilla");
   ok(f[0] && f[0].concepto === "COBRO DEUDA DEL FALLECIDO" && eq(f[0].v, 2992.50), "esposa: cobra lo que recibía él (50% de 5,985 = 2,992.50) para la deuda");
   ok(f[1] && f[1].concepto === "ORFANDAD" && eq(f[1].t, 2000) && eq(f[1].v, 1000), "hijo menor: orfandad 25% de 8,000 = 2,000, se paga 1,000");
   ok(f[2] && f[2].concepto === "ORFANDAD" && eq(f[2].v, 1000), "hijo que aún no cumple 18: orfandad 1,000");
