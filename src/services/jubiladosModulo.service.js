@@ -340,6 +340,92 @@ const registrarFallecimiento = async (id, body, currentUser) => {
   return { beneficiariosActivados: toNum(out.p_ben), message: out.p_res };
 };
 
+// ---------------------------------------------------------------------------
+// Fallecimientos registrados: corregir fecha/certificado o revertir.
+// Solo mientras ninguna planilla CERRADA haya pagado a sus beneficiarios (lo
+// cerrado ya es definitivo). Si hay una planilla GENERADA con ellos, se avisa
+// que hay que reversarla y generarla de nuevo para recalcular.
+// ---------------------------------------------------------------------------
+const listarFallecidos = async () => {
+  const [rows] = await pool.query(
+    `SELECT j.jub_correlativo AS id, j.jub_id AS codigo, CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS nombre,
+            j.jub_fecha_fallecimiento AS fechaFallecimiento, j.jub_no_defuncion AS noDefuncion,
+            (SELECT COUNT(*) FROM RPJ_MNT_BENEFICIARIO b WHERE b.ben_id_jubilado = j.jub_correlativo) AS beneficiarios,
+            (SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero SEPARATOR ', ')
+               FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+              WHERE i.nin_id_jubilado = j.jub_correlativo AND i.nin_id_beneficiario IS NOT NULL
+                AND p.ppl_estado_proceso = 'CERRADA') AS planillasCerradas,
+            (SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero SEPARATOR ', ')
+               FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+              WHERE i.nin_id_jubilado = j.jub_correlativo AND i.nin_id_beneficiario IS NOT NULL
+                AND p.ppl_estado_proceso = 'GENERADA') AS planillasGeneradas
+       FROM RPJ_MNT_JUBILADO j
+      WHERE j.jub_estado_pago = 'FALLECIDO'
+      ORDER BY j.jub_fecha_fallecimiento DESC, nombre`
+  );
+  return rows.map((r) => ({ ...r, beneficiarios: toNum(r.beneficiarios), editable: !r.planillasCerradas }));
+};
+
+const estadoFallecido = async (id) => {
+  const lista = await listarFallecidos();
+  const f = lista.find((x) => Number(x.id) === Number(id));
+  if (!f) throw createError("El jubilado no está registrado como fallecido", 404);
+  if (!f.editable) {
+    throw createError(`Ya se pagó a sus beneficiarios en la planilla ${f.planillasCerradas} (CERRADA): el fallecimiento ya no se puede cambiar`, 409);
+  }
+  return f;
+};
+
+const avisoGeneradas = (f) => (f.planillasGeneradas
+  ? `La planilla ${f.planillasGeneradas} ya está GENERADA con sus beneficiarios: reviértala y genérela de nuevo para recalcular.`
+  : null);
+
+const corregirFallecimiento = async (id, body, currentUser) => {
+  const f = await estadoFallecido(id);
+  const fecha = String(body?.fechaFallecimiento || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("La fecha de fallecimiento es obligatoria");
+  if (fecha > new Date().toISOString().slice(0, 10)) throw createError("La fecha de fallecimiento no puede ser futura");
+  const noDef = String(body?.noDefuncion || "").trim();
+  if (!noDef) throw createError("El No. de certificado de defunción es obligatorio");
+  await pool.execute(
+    "UPDATE RPJ_MNT_JUBILADO SET jub_fecha_fallecimiento = ?, jub_no_defuncion = ? WHERE jub_correlativo = ? AND jub_estado_pago = 'FALLECIDO'",
+    [fecha, noDef.slice(0, 50), id]
+  );
+  await pool.execute(
+    "UPDATE RPJ_MNT_BENEFICIARIO SET ben_fecha_activacion = ? WHERE ben_id_jubilado = ? AND ben_estado = 'ACTIVO'",
+    [fecha, id]
+  );
+  logger.info("Fecha de fallecimiento corregida", { idJubilado: id, fecha, usuario: currentUser?.usuario });
+  return { id: Number(id), fechaFallecimiento: fecha, aviso: avisoGeneradas(f) };
+};
+
+const revertirFallecimiento = async (id, body, currentUser) => {
+  const f = await estadoFallecido(id);
+  if (f.planillasGeneradas) {
+    throw createError(`Primero reverse la planilla ${f.planillasGeneradas}: ya está GENERADA con sus beneficiarios`, 409);
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `UPDATE RPJ_MNT_JUBILADO SET jub_estado_pago = 'ACTIVO', jub_fecha_fallecimiento = NULL, jub_no_defuncion = NULL
+        WHERE jub_correlativo = ? AND jub_estado_pago = 'FALLECIDO'`, [id]
+    );
+    await conn.execute(
+      `UPDATE RPJ_MNT_BENEFICIARIO SET ben_estado = 'REGISTRADO', ben_fecha_activacion = NULL
+        WHERE ben_id_jubilado = ? AND ben_estado IN ('ACTIVO', 'INACTIVO')`, [id]
+    );
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+  logger.info("Fallecimiento revertido", { idJubilado: id, motivo: body?.motivo, usuario: currentUser?.usuario });
+  return { id: Number(id), estadoPago: "ACTIVO" };
+};
+
 // PDF de estado de cuenta (carta). Mismo estilo de los reportes formales
 // (utils/pdfLayout): encabezado institucional con logo, datos del jubilado,
 // resumen, explicación y el detalle mes a mes de la deuda.
@@ -458,6 +544,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
 };
 
 module.exports = {
+  listarFallecidos, corregirFallecimiento, revertirFallecimiento,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, registrarFallecimiento,
   generarEstadoCuentaPdf

@@ -16,6 +16,7 @@ const ADMIN_OP = authorizeRoles("ADMIN", "OPERADOR");
 const LECTURA = authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"); // consultas: CONSULTA solo lectura
 
 router.get("/buscar", LECTURA, controller.buscar);
+router.get("/fallecidos", LECTURA, controller.fallecidos);
 router.get("/no-amparistas", LECTURA, controller.noAmparistas);
 router.get("/:id/deuda-total", LECTURA, controller.deudaTotal);
 router.get("/:id/beneficiarios-registrados", LECTURA, controller.beneficiariosRegistrados);
@@ -25,6 +26,8 @@ router.get("/:id/ultimos-pagos", LECTURA, controller.ultimosPagos);
 router.get("/:id/deuda-detalle", LECTURA, controller.deudaDetalle);
 router.get("/:id/historia-completa", LECTURA, controller.historiaCompleta);
 router.get("/:id/estado-cuenta.pdf", LECTURA, controller.estadoCuentaPdf);
+router.put("/:id/fallecimiento", ADMIN_OP, auditAction("JUBILADOS", "CORREGIR_FALLECIMIENTO", (req) => `Corregir fallecimiento jubilado ${req.params.id}`), controller.corregirFallecimiento);
+router.post("/:id/fallecimiento/revertir", authorizeRoles("ADMIN"), auditAction("JUBILADOS", "REVERTIR_FALLECIMIENTO", (req) => `Revertir fallecimiento jubilado ${req.params.id}`), controller.revertirFallecimiento);
 router.post("/:id/fallecimiento", ADMIN_OP, auditAction("JUBILADOS", "FALLECIMIENTO", (req) => `Registrar fallecimiento jubilado ${req.params.id}`), controller.fallecimiento);
 
 module.exports = router;

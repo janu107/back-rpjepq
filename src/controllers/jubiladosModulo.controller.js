@@ -20,7 +20,12 @@ const estadoCuentaPdf = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+const fallecidos = async (req, res, next) => { try { return successResponse(res, await service.listarFallecidos(), "Fallecimientos registrados"); } catch (e) { next(e); } };
+const corregirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.corregirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento corregido"); } catch (e) { next(e); } };
+const revertirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.revertirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento revertido"); } catch (e) { next(e); } };
+
 module.exports = {
+  fallecidos, corregirFallecimiento, revertirFallecimiento,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, fallecimiento, estadoCuentaPdf
 };
