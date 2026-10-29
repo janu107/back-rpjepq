@@ -35,6 +35,8 @@ const getDepositos = async (idPlanilla, opciones = {}) => {
   let filas = rows.map((r) => ({ ...r, banco: nombreBanco(r.banco), monto: num(r.monto) }));
   const filtroBanco = String(opciones.banco || "").trim().toUpperCase();
   if (filtroBanco) filas = filas.filter((f) => f.banco === nombreBanco(filtroBanco) || f.banco === filtroBanco);
+  const filtroTipo = String(opciones.tipoJubilacion || "").trim().toUpperCase();
+  if (filtroTipo) filas = filas.filter((f) => String(f.tipo_jubilacion).toUpperCase() === filtroTipo);
 
   const bancos = [...new Set(filas.map((f) => f.banco))].sort((a, b) => ordenBanco(a) - ordenBanco(b) || a.localeCompare(b));
   const tipos = [...new Set(filas.map((f) => f.tipo_jubilacion))].sort((a, b) => ordenTipo(a) - ordenTipo(b) || a.localeCompare(b));
@@ -46,7 +48,7 @@ const getDepositos = async (idPlanilla, opciones = {}) => {
   });
   const totalBanco = Object.fromEntries(bancos.map((b) => [b, num(filas.filter((f) => f.banco === b).reduce((a, f) => a + f.monto, 0))]));
   const total = num(filas.reduce((a, f) => a + f.monto, 0));
-  return { planilla, filas, bancos, tipos, matriz, totalBanco, total, filtroBanco: filtroBanco ? nombreBanco(filtroBanco) : null };
+  return { planilla, filas, bancos, tipos, matriz, totalBanco, total, filtroBanco: filtroBanco ? nombreBanco(filtroBanco) : null, filtroTipo: filtroTipo || null };
 };
 
 const periodoTexto = (p) => { const s = String(p || ""); return s.length === 6 ? `${MES[Number(s.slice(4, 6)) - 1]} ${s.slice(0, 4)}` : s; };
@@ -63,7 +65,8 @@ const pdfDepositos = async (idPlanilla, opciones = {}, user) => {
   const ancho = pdf.anchoUtil(doc);
   const x0 = doc.page.margins.left;
   const impreso = `Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)})  ·  Pago ${pdf.fecha(d.planilla.fechaPago)}  ·  Impreso el ${pdf.fecha(new Date())}`;
-  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso });
+  const filtros = [d.filtroTipo ? `Tipo de jubilación: ${d.filtroTipo}` : null, d.filtroBanco ? `Banco: ${d.filtroBanco}` : null].filter(Boolean);
+  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso, lineas: filtros.length ? [filtros.join("   ·   ")] : [] });
   let primera = true;
   const nuevaHoja = (fn) => { if (!primera) doc.addPage(); primera = false; fn(doc); };
 
@@ -184,13 +187,12 @@ const pdfDepositos = async (idPlanilla, opciones = {}, user) => {
       .text(`Q ${pdf.q(d.total)}`, xB + anchoB * 0.6, y + 4, { width: anchoB * 0.4, align: "right" });
     doc.y = y + 26;
     doc.font("Helvetica").fontSize(7.5).text(`${d.filas.length} depósitos · ${numeroALetras(d.total)}`, x0, doc.y, { width: ancho, align: "center" });
-    if (d.filtroBanco) doc.font("Helvetica-Oblique").fontSize(7).text(`Filtrado por banco: ${d.filtroBanco}`, { align: "center" });
     pdf.bloqueFirmas(doc, firmas);
   }
 
   pdf.pieDePagina(doc, user?.usuario);
   logger.info("Reporte de depósitos por banco", { idPlanilla, seccion, banco: d.filtroBanco, usuario: user?.usuario });
-  return { buffer: await pdf.aBuffer(doc), filename: `depositos_${d.planilla.numero}${d.filtroBanco ? `_${d.filtroBanco.replace(/\s+/g, "_").toLowerCase()}` : ""}.pdf` };
+  return { buffer: await pdf.aBuffer(doc), filename: `${seccion === "resumen" ? "resumen_depositos" : "depositos"}_${d.planilla.numero}.pdf` };
 };
 
 // ---------------------------------------------------------------------------
@@ -201,6 +203,7 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
   const d = await getDepositos(idPlanilla, opciones);
   if (!d.filas.length) throw createError("La planilla no tiene depósitos para el filtro elegido", 409);
   const firmas = parsearFirmas(opciones.firmas);
+  const seccion = String(opciones.seccion || "todo").toLowerCase();
   const MONEDA = '"Q "#,##0.00';
   const OSCURO = "FF1F4E5F"; const CLARO = "FFDDE3EA";
   const wb = new ExcelJS.Workbook();
@@ -215,6 +218,8 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
     t("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", 11);
     t(sub, 11);
     t(`Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)}) · Pago ${pdf.fecha(d.planilla.fechaPago)} · Impreso el ${pdf.fecha(new Date())}`, 9, false);
+    const f = [d.filtroTipo ? `Tipo de jubilación: ${d.filtroTipo}` : null, d.filtroBanco ? `Banco: ${d.filtroBanco}` : null].filter(Boolean);
+    if (f.length) t(f.join(" · "), 9, false);
     ws.addRow([]);
   };
   const pintar = (r, fondo, blanco) => r.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fondo } }; c.font = { bold: true, color: { argb: blanco ? "FFFFFFFF" : "FF000000" } }; });
@@ -230,6 +235,7 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
   };
 
   // Resumen
+  if (seccion !== "detalle") {
   const wr = wb.addWorksheet("Resumen", { pageSetup: { paperSize: 1, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   const nc = d.bancos.length + 2;
   wr.getColumn(1).width = 28;
@@ -247,9 +253,10 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
   d.bancos.forEach((b) => { const r = wr.addRow([`TOTAL ${b}`, d.totalBanco[b]]); r.getCell(2).numFmt = MONEDA; });
   const rg = wr.addRow(["TOTAL GENERAL", d.total]); rg.font = { bold: true }; rg.getCell(2).numFmt = MONEDA;
   ponerFirmas(wr);
+  }
 
   // Una hoja por banco
-  d.bancos.forEach((banco) => {
+  if (seccion !== "resumen") d.bancos.forEach((banco) => {
     const ws = wb.addWorksheet(banco.slice(0, 31), { pageSetup: { paperSize: 1, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
     [6, 9, 42, 20, 16, 50].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     titulo(ws, 6, `DEPÓSITOS DE LA NÓMINA DE JUBILADOS — ${banco}`);
@@ -272,7 +279,7 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
   });
 
   const buffer = await wb.xlsx.writeBuffer();
-  return { buffer: Buffer.from(buffer), filename: `depositos_${d.planilla.numero}.xlsx` };
+  return { buffer: Buffer.from(buffer), filename: `${seccion === "resumen" ? "resumen_depositos" : "depositos"}_${d.planilla.numero}.xlsx` };
 };
 
 // Planillas de jubilados para elegir el período (AAAAMM).
