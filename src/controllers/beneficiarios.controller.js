@@ -14,7 +14,9 @@ const reactivar = async (req, res, next) => { try { return successResponse(res, 
 const actualizar = async (req, res, next) => { try { return successResponse(res, await service.actualizar(req.params.id, req.body, req.user), "Beneficiario actualizado correctamente"); } catch (e) { next(e); } };
 const actualizarPorcentajes = async (req, res, next) => { try { return successResponse(res, await service.actualizarPorcentajes(req.params.id, req.body, req.user), "Porcentajes actualizados correctamente"); } catch (e) { next(e); } };
 
-module.exports = { actualizar, actualizarPorcentajes,
+const estadoCuenta = async (req, res, next) => { try { return successResponse(res, await service.estadoCuenta(req.params.id), "Estado de cuenta del beneficiario"); } catch (e) { next(e); } };
+
+module.exports = { estadoCuenta, actualizar, actualizarPorcentajes,
   buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor,
   getActivos, getSuspendidos, suspender, reactivar
 };

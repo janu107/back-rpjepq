@@ -384,6 +384,115 @@ const actualizarPorcentajes = async (idJubilado, payload, currentUser) => {
   return getByJubilado(idJubilado);
 };
 
+// ---------------------------------------------------------------------------
+// Estado de cuenta de un beneficiario (viuda o huérfano de un jubilado fallecido).
+//   - Esposa mientras cobra la deuda del fallecido: avance de esa deuda.
+//   - Viudez / orfandad: lo que se le debe cada mes, lo pagado y lo pendiente.
+//   - Pagos recibidos por planilla (sin las REVERSADAS).
+// ---------------------------------------------------------------------------
+const estadoCuenta = async (id) => {
+  const [[b]] = await pool.query(
+    `SELECT b.ben_correlativo AS id, b.ben_tipo_parentesco AS parentesco, b.ben_nombres AS nombres, b.ben_apellidos AS apellidos,
+            b.ben_dpi AS dpi, b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje, b.ben_estado AS estado,
+            b.ben_fecha_activacion AS fechaActivacion, b.ben_fecha_desactivacion AS fechaDesactivacion,
+            b.ben_forma_pago AS formaPago, bb.ban_descripcion AS banco, b.ben_cuenta AS cuenta,
+            j.jub_correlativo AS idJubilado, j.jub_id AS codigoJubilado, CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS fallecido,
+            j.jub_estado_pago AS estadoJubilado, j.jub_fecha_fallecimiento AS fechaFallecimiento,
+            (SELECT MAX(s.sal_salario) FROM RPJ_MNT_SALARIO s WHERE s.sal_id_jubilado = j.jub_correlativo
+                AND s.sal_tipo_manejo = 2 AND s.sal_tipo_ingreso = 1) AS pension
+       FROM RPJ_MNT_BENEFICIARIO b
+       JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = b.ben_id_jubilado
+       LEFT JOIN RPJ_CAT_BANCOS bb ON bb.ban_id = b.ben_id_banco
+      WHERE b.ben_correlativo = ?`, [id]
+  );
+  if (!b) throw createError("Beneficiario no encontrado", 404);
+
+  const [[tut]] = await pool.query(
+    `SELECT TRIM(CONCAT(COALESCE(t.tut_nombres, ''), ' ', t.tut_apellidos)) AS nombre, t.tut_dpi AS dpi,
+            t.tut_forma_pago AS formaPago, tb.ban_descripcion AS banco, t.tut_cuenta AS cuenta
+       FROM RPJ_MNT_TUTOR t LEFT JOIN RPJ_CAT_BANCOS tb ON tb.ban_id = t.tut_id_banco
+      WHERE t.tut_id_beneficiario = ? AND t.tut_estado = 'VIGENTE' ORDER BY t.tut_correlativo DESC LIMIT 1`, [id]
+  );
+  const [[pla]] = await pool.query(
+    "SELECT ppl_porcentaje_pago AS pct FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 ORDER BY ppl_numero DESC LIMIT 1"
+  );
+  const pctPlanilla = toNum(pla?.pct || 50);
+  const edadHoy = b.fechaNacimiento ? edad(b.fechaNacimiento) : null;
+  const esMenor = b.parentesco !== "ESPOSA" && edadHoy !== null && edadHoy < 18;
+
+  // Deuda del fallecido (la cobra la esposa).
+  let deudaFallecido = null;
+  if (b.parentesco === "ESPOSA") {
+    const [[d]] = await pool.query(
+      `SELECT COALESCE(SUM(deu_monto_original), 0) AS original, COALESCE(SUM(deu_monto_pagado), 0) AS pagado,
+              COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente, SUM(deu_monto_pendiente > 0) AS mesesPendientes,
+              MIN(CASE WHEN deu_monto_pendiente > 0 THEN deu_periodo END) AS proximoMes,
+              (SELECT deu_monto_original FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? ORDER BY deu_periodo DESC LIMIT 1) AS ultimoLiquido
+         FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ?`, [b.idJubilado, b.idJubilado]
+    );
+    const [[c]] = await pool.query(
+      `SELECT COALESCE(SUM(a.apa_monto_aplicado), 0) AS cobrado
+         FROM RPJ_PRC_APLICACION_PAGO a JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = a.apa_id_planilla
+        WHERE a.apa_id_jubilado = ? AND a.apa_observaciones LIKE ? AND p.ppl_estado_proceso = 'CERRADA'`,
+      [b.idJubilado, `Beneficiario ${id}:%`]
+    );
+    const cuota = Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
+    deudaFallecido = {
+      total: toNum(d.original), pagado: toNum(d.pagado), pendiente: toNum(d.pendiente),
+      cobradoPorBeneficiaria: toNum(c.cobrado), mesesPendientes: toNum(d.mesesPendientes), proximoMes: d.proximoMes,
+      cuotaMensual: cuota, mesesParaTerminar: cuota > 0 ? Math.ceil(toNum(d.pendiente) / cuota) : null
+    };
+  }
+
+  const [meses] = await pool.query(
+    `SELECT d.dbe_periodo AS periodo, d.dbe_concepto AS concepto, d.dbe_monto_original AS debe, d.dbe_monto_pagado AS pagado,
+            d.dbe_monto_pendiente AS pendiente, d.dbe_estado AS estado,
+            (SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero SEPARATOR ', ')
+               FROM RPJ_PRC_APLICACION_PAGO_BEN a JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = a.apb_id_planilla
+              WHERE a.apb_id_deuda = d.dbe_correlativo) AS pagadoCon
+       FROM RPJ_PRC_DEUDA_BENEFICIARIO d WHERE d.dbe_id_beneficiario = ? ORDER BY d.dbe_periodo`, [id]
+  );
+  const [pagos] = await pool.query(
+    `SELECT p.ppl_numero AS planilla, p.ppl_estado_proceso AS estadoPlanilla, p.ppl_fecha_pago AS fechaPago,
+            i.nin_puesto AS concepto, i.nin_valor AS monto
+       FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+      WHERE i.nin_id_beneficiario = ? AND p.ppl_estado_proceso <> 'REVERSADA'
+      ORDER BY p.ppl_numero`, [id]
+  );
+
+  const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + toNum(x[k]), 0) * 100) / 100;
+  const pagosCerrados = pagos.filter((x) => x.estadoPlanilla === "CERRADA");
+  const pension = toNum(b.pension);
+  const montoMes = Math.round(pension * toNum(b.porcentaje)) / 100;
+  let fase;
+  if (b.estado === "INACTIVO") fase = "TERMINADO";
+  else if (b.estado === "REGISTRADO") fase = "AÚN NO COBRA (el jubilado no está registrado como fallecido)";
+  else if (b.parentesco === "ESPOSA") fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO" : "VIUDEZ";
+  else if (b.parentesco === "HIJO" && !esMenor) fase = "MAYOR DE EDAD: SE LE LIQUIDA LO QUE SE LE DEBE";
+  else fase = "ORFANDAD";
+
+  return {
+    beneficiario: {
+      id: b.id, nombre: `${b.nombres || ""} ${b.apellidos}`.trim(), parentesco: b.parentesco, dpi: b.dpi,
+      fechaNacimiento: b.fechaNacimiento, edad: edadHoy, esMenor, porcentaje: toNum(b.porcentaje), estado: b.estado,
+      fechaActivacion: b.fechaActivacion, fechaDesactivacion: b.fechaDesactivacion,
+      pago: esMenor && tut ? { aNombreDe: tut.nombre, formaPago: tut.formaPago, banco: tut.banco, cuenta: tut.cuenta, esTutora: true }
+        : { aNombreDe: `${b.nombres || ""} ${b.apellidos}`.trim(), formaPago: b.formaPago, banco: b.banco, cuenta: b.cuenta, esTutora: false }
+    },
+    tutora: tut ? { nombre: tut.nombre, dpi: tut.dpi } : null,
+    fallecido: { id: b.idJubilado, codigo: b.codigoJubilado, nombre: b.fallecido, fechaFallecimiento: b.fechaFallecimiento, pension },
+    fase,
+    mensual: { seLeDebe: montoMes, seLePaga: Math.round(montoMes * pctPlanilla) / 100, porcentajePlanilla: pctPlanilla },
+    deudaFallecido,
+    resumen: {
+      debe: sum(meses, "debe"), pagado: sum(meses, "pagado"), pendiente: sum(meses, "pendiente"),
+      recibido: sum(pagosCerrados, "monto"), planillasCobradas: pagosCerrados.length
+    },
+    meses: meses.map((m) => ({ ...m, debe: toNum(m.debe), pagado: toNum(m.pagado), pendiente: toNum(m.pendiente) })),
+    pagos: pagos.map((x) => ({ ...x, monto: toNum(x.monto) }))
+  };
+};
+
 const registrarTutor = async (payload, currentUser) => {
   if (!payload?.idBeneficiario) throw createError("Debe indicar el beneficiario (idBeneficiario)");
   validarTutora(payload, "Tutora");
@@ -469,6 +578,6 @@ const reactivar = async (id, currentUser) => {
 };
 
 module.exports = {
-  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, actualizar, actualizarPorcentajes,
+  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, actualizar, actualizarPorcentajes,
   getActivos, getSuspendidos, suspender, reactivar
 };
