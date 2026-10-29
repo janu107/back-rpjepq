@@ -64,11 +64,11 @@ const dibujarLogo = (doc) => {
 };
 
 // "area" se muestra al centro del encabezado (ej. OPERATIVO), debajo del título.
-const encabezado = (doc, { titulo, subtitulo, lineas = [], area }) => {
+const encabezado = (doc, { titulo, subtitulo, lineas = [], area, institucion = "DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL" }) => {
   dibujarLogo(doc);
   // Nombre institucional, igual al que ya usan los reportes en pantalla.
   doc.font("Helvetica-Bold").fontSize(12).text("REGIMEN DE PENSIONES Y JUBILACIONES", { align: "center" });
-  doc.fontSize(10).text("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", { align: "center" });
+  doc.fontSize(10).text(institucion, { align: "center" });
   doc.moveDown(0.25).fontSize(10).text(String(titulo || "").toUpperCase(), { align: "center" });
   if (area) doc.font("Helvetica-Bold").fontSize(10).text(String(area).toUpperCase(), { align: "center" });
   if (subtitulo) doc.font("Helvetica").fontSize(8).text(subtitulo, { align: "center" });

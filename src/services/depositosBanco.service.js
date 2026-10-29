@@ -65,7 +65,7 @@ const pdfDepositos = async (idPlanilla, opciones = {}, user) => {
   const ancho = pdf.anchoUtil(doc);
   const x0 = doc.page.margins.left;
   const impreso = `Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)})  ·  Pago ${pdf.fecha(d.planilla.fechaPago)}`;
-  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso });
+  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso, institucion: "DE LA EMPRESA PORTUARIA QUETZAL" });
   let primera = true;
   const nuevaHoja = (fn) => { if (!primera) doc.addPage(); primera = false; fn(doc); };
 
@@ -227,11 +227,9 @@ const excelDepositos = async (idPlanilla, opciones = {}) => {
       r.getCell(1).font = { bold: negrita, size: tam }; r.getCell(1).alignment = { horizontal: "center" };
     };
     t("REGIMEN DE PENSIONES Y JUBILACIONES", 13);
-    t("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", 11);
+    t("DE LA EMPRESA PORTUARIA QUETZAL", 11);
     t(sub, 11);
-    t(`Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)}) · Pago ${pdf.fecha(d.planilla.fechaPago)} · Impreso el ${pdf.fecha(new Date())}`, 9, false);
-    const f = [d.filtroTipo ? `Tipo de jubilación: ${d.filtroTipo}` : null, d.filtroBanco ? `Banco: ${d.filtroBanco}` : null].filter(Boolean);
-    if (f.length) t(f.join(" · "), 9, false);
+    t(`Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)}) · Pago ${pdf.fecha(d.planilla.fechaPago)}`, 9, false);
     ws.addRow([]);
   };
   const pintar = (r, fondo, blanco) => r.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fondo } }; c.font = { bold: true, color: { argb: blanco ? "FFFFFFFF" : "FF000000" } }; });
