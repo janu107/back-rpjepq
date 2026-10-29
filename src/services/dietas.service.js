@@ -142,6 +142,130 @@ const CUENTAS_DIETA = {
 
 const MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
 
+// ---------------------------------------------------------------------------
+// Cheque-voucher del BANCO INDUSTRIAL (BI). Medidas tomadas de la forma física
+// (foto con regla, 2026-10-29), en puntos (72 = 1") desde la esquina superior
+// izquierda de la forma. ajusteX / ajusteY mueven todo si la impresora corre la hoja.
+// Cada banco tiene su formato; los que aún no lo tienen usan el formato general.
+// ---------------------------------------------------------------------------
+const CHEQUE_BI = {
+  lugar: "PUERTO QUETZAL",
+  ajusteX: 0, ajusteY: 0,
+  ancho: 533, altoCheque: 220, altoVoucher: 610,
+  fecha: { x: 103, y: 65, ancho: 330 },
+  monto: { derecha: 492, y: 65 },
+  beneficiario: { x: 105, y: 91, ancho: 380 },
+  letras: { x: 109, y: 111, ancho: 400 },
+  vNombre: { centro: 300, y: 226 },
+  vNumero: { derecha: 520, y: 223 },
+  vDescripcion: { x: 109, y: 248, ancho: 370 },
+  columnas: { cuenta: 0, concepto: 75, debe: 353, haber: 437, fin: 533 },
+  encabezadoTabla: { y: 280, alto: 12 },
+  vChequeNo: { y: 301 },
+  partida: { x: 112, y: 326, paso: 11 },
+  totales: { y: 362 },
+  recibido: { x: 113, y: [401, 429, 457], hasta: 418 },
+  vFecha: { derecha: 528, y: 530 }
+};
+
+const MESES_BI = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+// "SETECIENTOS CINCUENTA QUETZALES CON 00/100" -> "Setecientos Cincuenta Quetzales Exactos"
+const letrasBI = (texto) => {
+  const t = String(texto).replace(/ CON 00\/100$/, " EXACTOS");
+  return t.toLowerCase().split(" ").map((w) => (w === "con" || w === "y" ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+};
+
+const dibujarChequeBI = (doc, d, completo, L) => {
+  const C = CHEQUE_BI;
+  const X = (x) => x + C.ajusteX;
+  const Y = (y) => y + C.ajusteY;
+  const negro = () => doc.fillColor("#000000");
+  const f = d.fechaPago ? new Date(d.fechaPago) : new Date();
+  const dia = String(f.getDate()).padStart(2, "0");
+  const fechaLarga = `${C.lugar}, ${dia} DE ${MESES_BI[f.getMonth()]} DE ${f.getFullYear()}`;
+  const fechaCorta = `${f.getDate()}/${f.getMonth() + 1}/${f.getFullYear()}`;
+  const col = C.columnas;
+
+  if (completo) {
+    // Guía de la forma (solo para revisar en hoja blanca).
+    doc.save().lineWidth(0.6).strokeColor("#9AA5B1").dash(3, { space: 3 })
+      .rect(X(0), Y(0), C.ancho, C.altoCheque).stroke()
+      .rect(X(0), Y(C.altoCheque + 2), C.ancho, C.altoVoucher - C.altoCheque - 2).stroke().undash().restore();
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F4E79").text("BANCO INDUSTRIAL, S. A.", X(10), Y(12));
+    doc.font("Helvetica").fontSize(7).fillColor("#555555")
+      .text("JUNTA ADMINISTRADORA DEL REGIMEN DE PENSIONES Y JUBILACIONES E.P.Q.", X(210), Y(12), { width: 260, align: "center" })
+      .text("LUGAR Y FECHA", X(8), Y(C.fecha.y + 1))
+      .text("PAGO A LA ORDEN DE", X(8), Y(C.beneficiario.y + 1))
+      .text("SUMA DE QUETZALES", X(8), Y(C.letras.y + 1))
+      .text("Q.", X(C.monto.derecha - 90), Y(C.monto.y + 1))
+      .text("FIRMA AUTORIZADA", X(300), Y(152)).text("FIRMA AUTORIZADA", X(420), Y(152))
+      .text("DESCRIPCION DEL PAGO", X(8), Y(C.altoCheque + 8));
+    [[C.fecha.x, C.fecha.y + 11, 450], [C.beneficiario.x, C.beneficiario.y + 11, 520], [C.letras.x, C.letras.y + 11, 520]].forEach(([x1, y1, x2]) => {
+      doc.save().lineWidth(0.4).strokeColor("#9AA5B1").moveTo(X(x1), Y(y1)).lineTo(X(x2), Y(y1)).stroke().restore();
+    });
+    // Tabla de la partida.
+    const yT = C.encabezadoTabla.y;
+    doc.save().rect(X(0), Y(yT), C.ancho, C.encabezadoTabla.alto).fill("#222222").restore();
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#FFFFFF")
+      .text("CUENTA No.", X(col.cuenta + 4), Y(yT + 3), { width: col.concepto - 8 })
+      .text("C O N C E P T O", X(col.concepto), Y(yT + 3), { width: col.debe - col.concepto, align: "center" })
+      .text("DEBE", X(col.debe), Y(yT + 3), { width: col.haber - col.debe, align: "center" })
+      .text("HABER", X(col.haber), Y(yT + 3), { width: col.fin - col.haber, align: "center" });
+    doc.save().lineWidth(0.5).strokeColor("#555555");
+    [col.concepto, col.debe, col.haber].forEach((x) => doc.moveTo(X(x), Y(yT)).lineTo(X(x), Y(C.altoVoucher - 30)).stroke());
+    doc.moveTo(X(0), Y(C.altoVoucher - 30)).lineTo(X(C.ancho), Y(C.altoVoucher - 30)).stroke();
+    doc.restore();
+    doc.font("Helvetica").fontSize(6).fillColor("#555555");
+    [["NOMBRE", 20], ["REVISADO", 100], ["AUTORIZADO", 170], ["RECIBI CONFORME", 320], ["DIA   MES   AÑO", 460]]
+      .forEach(([t, x]) => doc.text(t, X(x), Y(C.altoVoucher - 27)));
+  }
+  negro();
+
+  // --- Cheque ---
+  doc.font("Helvetica-Bold").fontSize(9.5).text(fechaLarga, X(C.fecha.x), Y(C.fecha.y), { width: C.fecha.ancho, lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(10).text(L.q(d.monto), X(C.monto.derecha - 120), Y(C.monto.y), { width: 120, align: "right", lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(9.5).text(d.nombre, X(C.beneficiario.x), Y(C.beneficiario.y), { width: C.beneficiario.ancho, lineBreak: false, ellipsis: true });
+  doc.font("Helvetica").fontSize(8.5).text(letrasBI(d.letras), X(C.letras.x), Y(C.letras.y), { width: C.letras.ancho, lineBreak: false, ellipsis: true });
+
+  // --- Voucher ---
+  doc.font("Helvetica-Bold").fontSize(10).text(d.nombre, X(C.vNombre.centro - 180), Y(C.vNombre.y), { width: 280, align: "center", lineBreak: false, ellipsis: true });
+  doc.font("Helvetica").fontSize(14).fillColor("#333333").text(String(d.noDocumento), X(C.vNumero.derecha - 120), Y(C.vNumero.y), { width: 120, align: "right", lineBreak: false });
+  negro();
+  doc.font("Helvetica-Bold").fontSize(7.5).text(d.descripcion, X(C.vDescripcion.x), Y(C.vDescripcion.y), { width: C.vDescripcion.ancho, height: 22 });
+  doc.font("Helvetica-Bold").fontSize(8).text(`Cheque ${d.noDocumento}`, X(col.concepto), Y(C.vChequeNo.y), { width: col.debe - col.concepto, align: "center" });
+
+  // Partida: debe / haber.
+  let yP = C.partida.y;
+  d.partida.forEach((r) => {
+    doc.font("Helvetica-Bold").fontSize(7.5).text(r.descripcion, X(C.partida.x), Y(yP), { width: col.debe - C.partida.x - 4, lineBreak: false, ellipsis: true });
+    if (r.debe) {
+      doc.text("Q", X(col.debe + 3), Y(yP)).text(L.q(r.debe), X(col.debe), Y(yP), { width: col.haber - col.debe - 4, align: "right" });
+    }
+    if (r.haber) {
+      doc.text("Q", X(col.haber + 3), Y(yP)).text(L.q(r.haber), X(col.haber), Y(yP), { width: col.fin - col.haber - 4, align: "right" });
+    }
+    yP += C.partida.paso;
+  });
+  const sumaDebe = d.partida.reduce((a, r) => a + Number(r.debe || 0), 0);
+  const sumaHaber = d.partida.reduce((a, r) => a + Number(r.haber || 0), 0);
+  doc.save().lineWidth(0.6).strokeColor("#000000")
+    .moveTo(X(col.debe + 2), Y(C.totales.y - 2)).lineTo(X(col.fin - 2), Y(C.totales.y - 2)).stroke().restore();
+  doc.font("Helvetica-Bold").fontSize(7.5)
+    .text("Q", X(col.debe + 3), Y(C.totales.y)).text(L.q(sumaDebe), X(col.debe), Y(C.totales.y), { width: col.haber - col.debe - 4, align: "right" })
+    .text("Q", X(col.haber + 3), Y(C.totales.y)).text(L.q(sumaHaber), X(col.haber), Y(C.totales.y), { width: col.fin - col.haber - 4, align: "right" });
+  doc.save().lineWidth(1).strokeColor("#000000")
+    .moveTo(X(col.debe + 2), Y(C.totales.y + 10)).lineTo(X(col.fin - 2), Y(C.totales.y + 10)).stroke().restore();
+
+  // Recibido (lo llena quien recibe el cheque).
+  ["Nombre:", "Fecha y Hora de Recibido:", "No. DPI:"].forEach((t, i) => {
+    const y = C.recibido.y[i];
+    doc.font("Helvetica-Bold").fontSize(8).text(t, X(C.recibido.x), Y(y), { lineBreak: false });
+    const xIni = C.recibido.x + doc.widthOfString(t) + 3;
+    doc.save().lineWidth(0.5).strokeColor("#000000").moveTo(X(xIni), Y(y + 8)).lineTo(X(C.recibido.hasta), Y(y + 8)).stroke().restore();
+  });
+  doc.font("Helvetica-Bold").fontSize(8).text(fechaCorta, X(C.vFecha.derecha - 80), Y(C.vFecha.y), { width: 80, align: "right" });
+};
+
 const generarChequePdf = async (id, usuario, modo = "completo") => {
   const L = require("../utils/pdfLayout");
   const { numeroALetras } = require("../utils/numeroALetras");
@@ -152,6 +276,25 @@ const generarChequePdf = async (id, usuario, modo = "completo") => {
   const [ses] = await pool.execute(sql("detalleSesiones"), [id]);
 
   const completo = modo !== "preimpreso";
+
+  // Banco Industrial: formato propio de su cheque-voucher.
+  if (/^(BI|BANCO INDUSTRIAL)$/i.test(String(p.banco || "").trim())) {
+    const [anioBI, mesBI] = String(p.periodo || "").split("-");
+    const docBI = L.nuevoDoc({ size: "LETTER", margin: 0 });
+    dibujarChequeBI(docBI, {
+      fechaPago: p.fechaPago, monto: p.valorPago, nombre: p.juntaNombre.toUpperCase(), letras: numeroALetras(p.valorPago),
+      noDocumento: p.noDocumento,
+      descripcion: `PAGO DE DIETAS POR ASISTENCIA A ${p.totalSesiones} SESION(ES) DE JUNTA DIRECTIVA, ${String(p.juntaPuesto || "").toUpperCase()}, CORRESPONDIENTE AL MES DE ${mesBI ? MESES_BI[Number(mesBI) - 1] : ""} DEL AÑO ${anioBI || ""}.`,
+      partida: [
+        { descripcion: CUENTAS_DIETA.gasto.nombre, debe: p.valor },
+        { descripcion: CUENTAS_DIETA.isr.nombre, haber: p.isr },
+        { descripcion: `BANCO INDUSTRIAL ${CUENTAS_DIETA.banco.codigo || ""}`.trim(), haber: p.valorPago }
+      ].filter((r) => Number(r.debe || r.haber || 0) > 0)
+    }, completo, L);
+    logger.info("Cheque de dieta impreso (BI)", { id, cheque: p.noDocumento, modo, usuario });
+    return { buffer: await L.aBuffer(docBI), filename: `cheque_${p.noDocumento}.pdf` };
+  }
+
   const C = CHEQUE;
   const X = (x) => x + C.ajusteX;
   const Y = (y) => y + C.ajusteY;
