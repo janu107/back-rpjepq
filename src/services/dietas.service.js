@@ -143,40 +143,70 @@ const CUENTAS_DIETA = {
 const MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
 
 // ---------------------------------------------------------------------------
-// Cheque-voucher del BANCO INDUSTRIAL (BI). Medidas tomadas de la forma física
-// (foto con regla, 2026-10-29), en puntos (72 = 1") desde la esquina superior
-// izquierda de la forma. ajusteX / ajusteY mueven todo si la impresora corre la hoja.
-// Cada banco tiene su formato; los que aún no lo tienen usan el formato general.
+// Cheque-voucher por banco. Cada banco tiene su forma física con medidas propias
+// (tomadas de fotos con regla, 2026-10-29), en puntos (72 = 1") desde la esquina
+// superior izquierda de la forma. ajusteX / ajusteY mueven todo si la impresora
+// corre la hoja. El número de cheque viene preimpreso en la forma; solo se
+// imprime en el concepto del voucher. Banco sin formato -> formato general.
 // ---------------------------------------------------------------------------
-const CHEQUE_BI = {
-  lugar: "PUERTO QUETZAL",
-  ajusteX: 0, ajusteY: 0,
-  ancho: 533, altoCheque: 220, altoVoucher: 610,
-  fecha: { x: 103, y: 65, ancho: 330 },
-  monto: { derecha: 492, y: 65 },
-  beneficiario: { x: 105, y: 91, ancho: 380 },
-  letras: { x: 109, y: 111, ancho: 400 },
-  vNombre: { centro: 300, y: 226 },
-  vNumero: { derecha: 520, y: 223 },
-  vDescripcion: { x: 109, y: 248, ancho: 370 },
-  columnas: { cuenta: 0, concepto: 75, debe: 353, haber: 437, fin: 533 },
-  encabezadoTabla: { y: 280, alto: 12 },
-  vChequeNo: { y: 301 },
-  partida: { x: 112, y: 326, paso: 11 },
-  totales: { y: 362 },
-  recibido: { x: 113, y: [401, 429, 457], hasta: 418 },
-  vFecha: { derecha: 528, y: 530 }
+const FORMATOS_CHEQUE = {
+  BI: {
+    nombre: "BANCO INDUSTRIAL, S. A.", cuentaBanco: "BANCO INDUSTRIAL CTA. 018-502333-8",
+    lugar: "PUERTO QUETZAL", ajusteX: 0, ajusteY: 0,
+    ancho: 533, altoCheque: 220, altoVoucher: 610,
+    fecha: { x: 103, y: 65, ancho: 290 },
+    monto: { derecha: 492, y: 65 },
+    beneficiario: { x: 105, y: 91, ancho: 380 },
+    letras: { x: 109, y: 111, ancho: 400 },
+    noNegociable: null,
+    vNombre: { centro: 300, y: 226, ancho: 280 },
+    vDescripcion: { x: 109, y: 248, ancho: 370 },
+    columnas: { cuenta: 0, concepto: 75, debe: 353, haber: 437, fin: 533 },
+    encabezadoTabla: { y: 280, alto: 12 },
+    vChequeNo: { y: 301, alinear: "center" },
+    partida: { x: 112, y: 326, paso: 11, fuente: 7.5 },
+    totales: { y: 362 },
+    recibido: { x: 113, y: [401, 429, 457], hasta: 418 },
+    vFecha: { derecha: 528, y: 530 },
+    pie: ["NOMBRE", "REVISADO", "AUTORIZADO", "RECIBI CONFORME"]
+  },
+  BANRURAL: {
+    nombre: "BANRURAL", cuentaBanco: "BANCO BANRURAL CTA. 3-114-00103-4",
+    lugar: "PUERTO QUETZAL", ajusteX: 0, ajusteY: 0,
+    ancho: 550, altoCheque: 230, altoVoucher: 624,
+    fecha: { x: 115, y: 65, ancho: 300 },
+    monto: { derecha: 540, y: 73 },
+    beneficiario: { x: 115, y: 92, ancho: 400 },
+    letras: { x: 116, y: 110, ancho: 358 },
+    noNegociable: { x: 115, y: 122 },
+    vNombre: { centro: 329, y: 235, ancho: 300 },
+    vDescripcion: { x: 115, y: 248, ancho: 425 },
+    columnas: { cuenta: 0, concepto: 81, debe: 361, haber: 449, fin: 536 },
+    encabezadoTabla: { y: 286, alto: 11 },
+    vChequeNo: { y: 303, alinear: "right", derecha: 352 },
+    partida: { x: 115, y: 336, paso: 16, fuente: 8.5 },
+    totales: { y: 373 },
+    recibido: { x: 115, y: [402, 438, 471], hasta: 388 },
+    vFecha: { derecha: 534, y: 567 },
+    pie: ["HECHO POR", "REVISADO", "AUTORIZADO", "RECIBI CONFORME"]
+  }
+};
+const formatoCheque = (banco) => {
+  const b = String(banco || "").trim().toUpperCase();
+  if (b === "BI" || b === "BANCO INDUSTRIAL") return FORMATOS_CHEQUE.BI;
+  if (b === "BANRURAL") return FORMATOS_CHEQUE.BANRURAL;
+  return null;
 };
 
 const MESES_BI = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
 // "SETECIENTOS CINCUENTA QUETZALES CON 00/100" -> "Setecientos Cincuenta Quetzales Exactos"
-const letrasBI = (texto) => {
+// "... QUETZALES CON 84/100" -> "... Quetzales con 84/100"
+const letrasCheque = (texto) => {
   const t = String(texto).replace(/ CON 00\/100$/, " EXACTOS");
   return t.toLowerCase().split(" ").map((w) => (w === "con" || w === "y" ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
 };
 
-const dibujarChequeBI = (doc, d, completo, L) => {
-  const C = CHEQUE_BI;
+const dibujarChequeBanco = (doc, d, completo, L, C) => {
   const X = (x) => x + C.ajusteX;
   const Y = (y) => y + C.ajusteY;
   const negro = () => doc.fillColor("#000000");
@@ -185,76 +215,82 @@ const dibujarChequeBI = (doc, d, completo, L) => {
   const fechaLarga = `${C.lugar}, ${dia} DE ${MESES_BI[f.getMonth()]} DE ${f.getFullYear()}`;
   const fechaCorta = `${f.getDate()}/${f.getMonth() + 1}/${f.getFullYear()}`;
   const col = C.columnas;
+  const fondoTabla = C.altoVoucher - 30;
 
   if (completo) {
     // Guía de la forma (solo para revisar en hoja blanca).
     doc.save().lineWidth(0.6).strokeColor("#9AA5B1").dash(3, { space: 3 })
       .rect(X(0), Y(0), C.ancho, C.altoCheque).stroke()
       .rect(X(0), Y(C.altoCheque + 2), C.ancho, C.altoVoucher - C.altoCheque - 2).stroke().undash().restore();
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F4E79").text("BANCO INDUSTRIAL, S. A.", X(10), Y(12));
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F4E79").text(C.nombre, X(10), Y(12));
     doc.font("Helvetica").fontSize(7).fillColor("#555555")
-      .text("JUNTA ADMINISTRADORA DEL REGIMEN DE PENSIONES Y JUBILACIONES E.P.Q.", X(210), Y(12), { width: 260, align: "center" })
+      .text("REGIMEN DE PENSIONES Y JUBILACIONES DEL PERSONAL DE LA E.P.Q.", X(200), Y(12), { width: 280, align: "center" })
+      .text("CHEQUE No. (preimpreso)", X(C.ancho - 130), Y(26), { width: 120, align: "right" })
       .text("LUGAR Y FECHA", X(8), Y(C.fecha.y + 1))
       .text("PAGO A LA ORDEN DE", X(8), Y(C.beneficiario.y + 1))
       .text("SUMA DE QUETZALES", X(8), Y(C.letras.y + 1))
       .text("Q.", X(C.monto.derecha - 90), Y(C.monto.y + 1))
-      .text("FIRMA AUTORIZADA", X(300), Y(152)).text("FIRMA AUTORIZADA", X(420), Y(152))
+      .text("FIRMA", X(300), Y(C.altoCheque - 70)).text("FIRMA", X(430), Y(C.altoCheque - 70))
       .text("DESCRIPCION DEL PAGO", X(8), Y(C.altoCheque + 8));
-    [[C.fecha.x, C.fecha.y + 11, 450], [C.beneficiario.x, C.beneficiario.y + 11, 520], [C.letras.x, C.letras.y + 11, 520]].forEach(([x1, y1, x2]) => {
-      doc.save().lineWidth(0.4).strokeColor("#9AA5B1").moveTo(X(x1), Y(y1)).lineTo(X(x2), Y(y1)).stroke().restore();
+    [[C.fecha, C.fecha.x + C.fecha.ancho + 10], [C.beneficiario, C.ancho - 12], [C.letras, C.ancho - 12]].forEach(([c, x2]) => {
+      doc.save().lineWidth(0.4).strokeColor("#9AA5B1").moveTo(X(c.x), Y(c.y + 11)).lineTo(X(x2), Y(c.y + 11)).stroke().restore();
     });
-    // Tabla de la partida.
     const yT = C.encabezadoTabla.y;
     doc.save().rect(X(0), Y(yT), C.ancho, C.encabezadoTabla.alto).fill("#222222").restore();
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#FFFFFF")
-      .text("CUENTA No.", X(col.cuenta + 4), Y(yT + 3), { width: col.concepto - 8 })
-      .text("C O N C E P T O", X(col.concepto), Y(yT + 3), { width: col.debe - col.concepto, align: "center" })
-      .text("DEBE", X(col.debe), Y(yT + 3), { width: col.haber - col.debe, align: "center" })
-      .text("HABER", X(col.haber), Y(yT + 3), { width: col.fin - col.haber, align: "center" });
+      .text("CUENTA No.", X(col.cuenta + 4), Y(yT + 2.5), { width: col.concepto - 8 })
+      .text("C O N C E P T O", X(col.concepto), Y(yT + 2.5), { width: col.debe - col.concepto, align: "center" })
+      .text("DEBE", X(col.debe), Y(yT + 2.5), { width: col.haber - col.debe, align: "center" })
+      .text("HABER", X(col.haber), Y(yT + 2.5), { width: col.fin - col.haber, align: "center" });
     doc.save().lineWidth(0.5).strokeColor("#555555");
-    [col.concepto, col.debe, col.haber].forEach((x) => doc.moveTo(X(x), Y(yT)).lineTo(X(x), Y(C.altoVoucher - 30)).stroke());
-    doc.moveTo(X(0), Y(C.altoVoucher - 30)).lineTo(X(C.ancho), Y(C.altoVoucher - 30)).stroke();
+    [col.concepto, col.debe, col.haber].forEach((x) => doc.moveTo(X(x), Y(yT)).lineTo(X(x), Y(fondoTabla)).stroke());
+    doc.moveTo(X(0), Y(fondoTabla)).lineTo(X(C.ancho), Y(fondoTabla)).stroke();
     doc.restore();
     doc.font("Helvetica").fontSize(6).fillColor("#555555");
-    [["NOMBRE", 20], ["REVISADO", 100], ["AUTORIZADO", 170], ["RECIBI CONFORME", 320], ["DIA   MES   AÑO", 460]]
-      .forEach(([t, x]) => doc.text(t, X(x), Y(C.altoVoucher - 27)));
+    C.pie.forEach((t, i) => doc.text(t, X([20, 100, 170, 320][i]), Y(fondoTabla + 3)));
+    doc.text("DIA   MES   AÑO", X(C.ancho - 80), Y(fondoTabla + 3));
   }
   negro();
 
   // --- Cheque ---
-  doc.font("Helvetica-Bold").fontSize(9.5).text(fechaLarga, X(C.fecha.x), Y(C.fecha.y), { width: C.fecha.ancho, lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(9.5).text(fechaLarga, X(C.fecha.x), Y(C.fecha.y), { width: C.fecha.ancho, height: 12, lineBreak: false, ellipsis: true });
   doc.font("Helvetica-Bold").fontSize(10).text(L.q(d.monto), X(C.monto.derecha - 120), Y(C.monto.y), { width: 120, align: "right", lineBreak: false });
-  doc.font("Helvetica-Bold").fontSize(9.5).text(d.nombre, X(C.beneficiario.x), Y(C.beneficiario.y), { width: C.beneficiario.ancho, lineBreak: false, ellipsis: true });
-  doc.font("Helvetica").fontSize(8.5).text(letrasBI(d.letras), X(C.letras.x), Y(C.letras.y), { width: C.letras.ancho, lineBreak: false, ellipsis: true });
+  doc.font("Helvetica-Bold").fontSize(9.5).text(d.nombre, X(C.beneficiario.x), Y(C.beneficiario.y), { width: C.beneficiario.ancho, height: 12, lineBreak: false, ellipsis: true });
+  doc.font("Helvetica").fontSize(8.5).text(letrasCheque(d.letras), X(C.letras.x), Y(C.letras.y), { width: C.letras.ancho, height: 11, lineBreak: false, ellipsis: true });
+  if (C.noNegociable) doc.font("Helvetica-Bold").fontSize(8.5).text("NO NEGOCIABLE", X(C.noNegociable.x), Y(C.noNegociable.y));
 
   // --- Voucher ---
-  doc.font("Helvetica-Bold").fontSize(10).text(d.nombre, X(C.vNombre.centro - 180), Y(C.vNombre.y), { width: 280, align: "center", lineBreak: false, ellipsis: true });
-  doc.font("Helvetica").fontSize(14).fillColor("#333333").text(String(d.noDocumento), X(C.vNumero.derecha - 120), Y(C.vNumero.y), { width: 120, align: "right", lineBreak: false });
-  negro();
+  doc.font("Helvetica-Bold").fontSize(9.5).text(d.nombre, X(C.vNombre.centro - C.vNombre.ancho / 2), Y(C.vNombre.y), { width: C.vNombre.ancho, align: "center", height: 12, lineBreak: false, ellipsis: true });
   doc.font("Helvetica-Bold").fontSize(7.5).text(d.descripcion, X(C.vDescripcion.x), Y(C.vDescripcion.y), { width: C.vDescripcion.ancho, height: 22 });
-  doc.font("Helvetica-Bold").fontSize(8).text(`Cheque ${d.noDocumento}`, X(col.concepto), Y(C.vChequeNo.y), { width: col.debe - col.concepto, align: "center" });
+  if (C.vChequeNo.alinear === "right") {
+    doc.font("Helvetica-Bold").fontSize(10).text(String(d.noDocumento), X(C.vChequeNo.derecha - 150), Y(C.vChequeNo.y), { width: 150, align: "right" });
+  } else {
+    doc.font("Helvetica-Bold").fontSize(8).text(`Cheque ${d.noDocumento}`, X(col.concepto), Y(C.vChequeNo.y), { width: col.debe - col.concepto, align: "center" });
+  }
 
   // Partida: debe / haber.
+  const fp = C.partida.fuente;
+  const monto = (v, desde, hasta, y) => {
+    doc.text("Q", X(desde + 6), Y(y)).text(L.q(v), X(desde), Y(y), { width: hasta - desde - 4, align: "right" });
+  };
+  // Si vienen más líneas que las que caben con el paso normal, se juntan un poco.
+  const paso = Math.min(C.partida.paso, (C.totales.y - 4 - C.partida.y) / Math.max(d.partida.length, 1));
   let yP = C.partida.y;
   d.partida.forEach((r) => {
-    doc.font("Helvetica-Bold").fontSize(7.5).text(r.descripcion, X(C.partida.x), Y(yP), { width: col.debe - C.partida.x - 4, lineBreak: false, ellipsis: true });
-    if (r.debe) {
-      doc.text("Q", X(col.debe + 3), Y(yP)).text(L.q(r.debe), X(col.debe), Y(yP), { width: col.haber - col.debe - 4, align: "right" });
-    }
-    if (r.haber) {
-      doc.text("Q", X(col.haber + 3), Y(yP)).text(L.q(r.haber), X(col.haber), Y(yP), { width: col.fin - col.haber - 4, align: "right" });
-    }
-    yP += C.partida.paso;
+    doc.font("Helvetica-Bold").fontSize(fp).text(r.descripcion, X(C.partida.x), Y(yP), { width: col.debe - C.partida.x - 4, height: fp + 3, lineBreak: false, ellipsis: true });
+    if (r.debe) monto(r.debe, col.debe, col.haber, yP);
+    if (r.haber) monto(r.haber, col.haber, col.fin, yP);
+    yP += paso;
   });
   const sumaDebe = d.partida.reduce((a, r) => a + Number(r.debe || 0), 0);
   const sumaHaber = d.partida.reduce((a, r) => a + Number(r.haber || 0), 0);
   doc.save().lineWidth(0.6).strokeColor("#000000")
-    .moveTo(X(col.debe + 2), Y(C.totales.y - 2)).lineTo(X(col.fin - 2), Y(C.totales.y - 2)).stroke().restore();
-  doc.font("Helvetica-Bold").fontSize(7.5)
-    .text("Q", X(col.debe + 3), Y(C.totales.y)).text(L.q(sumaDebe), X(col.debe), Y(C.totales.y), { width: col.haber - col.debe - 4, align: "right" })
-    .text("Q", X(col.haber + 3), Y(C.totales.y)).text(L.q(sumaHaber), X(col.haber), Y(C.totales.y), { width: col.fin - col.haber - 4, align: "right" });
+    .moveTo(X(col.debe + 2), Y(C.totales.y - 3)).lineTo(X(col.fin - 2), Y(C.totales.y - 3)).stroke().restore();
+  doc.font("Helvetica-Bold").fontSize(fp);
+  monto(sumaDebe, col.debe, col.haber, C.totales.y);
+  monto(sumaHaber, col.haber, col.fin, C.totales.y);
   doc.save().lineWidth(1).strokeColor("#000000")
-    .moveTo(X(col.debe + 2), Y(C.totales.y + 10)).lineTo(X(col.fin - 2), Y(C.totales.y + 10)).stroke().restore();
+    .moveTo(X(col.debe + 2), Y(C.totales.y + fp + 4)).lineTo(X(col.fin - 2), Y(C.totales.y + fp + 4)).stroke().restore();
 
   // Recibido (lo llena quien recibe el cheque).
   ["Nombre:", "Fecha y Hora de Recibido:", "No. DPI:"].forEach((t, i) => {
@@ -263,7 +299,7 @@ const dibujarChequeBI = (doc, d, completo, L) => {
     const xIni = C.recibido.x + doc.widthOfString(t) + 3;
     doc.save().lineWidth(0.5).strokeColor("#000000").moveTo(X(xIni), Y(y + 8)).lineTo(X(C.recibido.hasta), Y(y + 8)).stroke().restore();
   });
-  doc.font("Helvetica-Bold").fontSize(8).text(fechaCorta, X(C.vFecha.derecha - 80), Y(C.vFecha.y), { width: 80, align: "right" });
+  doc.font("Helvetica-Bold").fontSize(8.5).text(fechaCorta, X(C.vFecha.derecha - 80), Y(C.vFecha.y), { width: 80, align: "right" });
 };
 
 const generarChequePdf = async (id, usuario, modo = "completo") => {
@@ -277,21 +313,22 @@ const generarChequePdf = async (id, usuario, modo = "completo") => {
 
   const completo = modo !== "preimpreso";
 
-  // Banco Industrial: formato propio de su cheque-voucher.
-  if (/^(BI|BANCO INDUSTRIAL)$/i.test(String(p.banco || "").trim())) {
+  // Bancos con formato propio de cheque-voucher (BI, Banrural).
+  const formato = formatoCheque(p.banco);
+  if (formato) {
     const [anioBI, mesBI] = String(p.periodo || "").split("-");
     const docBI = L.nuevoDoc({ size: "LETTER", margin: 0 });
-    dibujarChequeBI(docBI, {
+    dibujarChequeBanco(docBI, {
       fechaPago: p.fechaPago, monto: p.valorPago, nombre: p.juntaNombre.toUpperCase(), letras: numeroALetras(p.valorPago),
       noDocumento: p.noDocumento,
       descripcion: `PAGO DE DIETAS POR ASISTENCIA A ${p.totalSesiones} SESION(ES) DE JUNTA DIRECTIVA, ${String(p.juntaPuesto || "").toUpperCase()}, CORRESPONDIENTE AL MES DE ${mesBI ? MESES_BI[Number(mesBI) - 1] : ""} DEL AÑO ${anioBI || ""}.`,
       partida: [
         { descripcion: CUENTAS_DIETA.gasto.nombre, debe: p.valor },
         { descripcion: CUENTAS_DIETA.isr.nombre, haber: p.isr },
-        { descripcion: `BANCO INDUSTRIAL ${CUENTAS_DIETA.banco.codigo || ""}`.trim(), haber: p.valorPago }
+        { descripcion: formato.cuentaBanco, haber: p.valorPago }
       ].filter((r) => Number(r.debe || r.haber || 0) > 0)
-    }, completo, L);
-    logger.info("Cheque de dieta impreso (BI)", { id, cheque: p.noDocumento, modo, usuario });
+    }, completo, L, formato);
+    logger.info("Cheque de dieta impreso", { id, banco: formato.nombre, cheque: p.noDocumento, modo, usuario });
     return { buffer: await L.aBuffer(docBI), filename: `cheque_${p.noDocumento}.pdf` };
   }
 
