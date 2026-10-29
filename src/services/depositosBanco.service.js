@@ -290,4 +290,174 @@ const planillas = async () => {
   return rows;
 };
 
-module.exports = { getDepositos, pdfDepositos, excelDepositos, planillas };
+// ---------------------------------------------------------------------------
+// Oficios al banco: una carta por banco y tipo de jubilación autorizando debitar
+// la cuenta del régimen y acreditar a los jubilados (monto del listado de depósitos).
+// Los beneficiarios de jubilados fallecidos van en su propio oficio.
+// ---------------------------------------------------------------------------
+const MES_MIN = MES.map((m) => m.charAt(0) + m.slice(1).toLowerCase());
+const BENEFICIARIOS = "BENEFICIARIOS";
+
+// Datos del banco que se proponen; en pantalla se pueden cambiar.
+const DATOS_BANCO = {
+  BANRURAL: { nombre: "BANCO DE DESARROLLO RURAL, S.A.", agencia: "Agencia Puerto San José", direccion: "Av. 30 de junio", cuenta: "3-114-00103-4" },
+  "BANCO INDUSTRIAL": { nombre: "BANCO INDUSTRIAL, S.A.", agencia: "", direccion: "", cuenta: "" },
+  BANTRAB: { nombre: "BANCO DE LOS TRABAJADORES", agencia: "", direccion: "", cuenta: "" }
+};
+
+const fechaCarta = (v) => {
+  const [y, m, d] = String(v || "").slice(0, 10).split("-").map(Number);
+  const f = y ? new Date(y, m - 1, d) : new Date();
+  return `${String(f.getDate()).padStart(2, "0")} de ${MES[f.getMonth()].toLowerCase()} de ${f.getFullYear()}`;
+};
+
+// "1er.50% Febrero 2023" (queda la mitad pendiente), "2do.50% Agosto 2023" (se completa
+// un mes atrasado) o "100% Octubre 2026" (el mes de la planilla).
+const etiquetaPeriodo = (f, numeroPlanilla) => {
+  const p = String(f.periodo_aplicado || "");
+  if (p.length !== 6) return null;
+  const mes = `${MES_MIN[Number(p.slice(4, 6)) - 1]} ${p.slice(0, 4)}`;
+  const pct = Number(f.pct_periodo || 0);
+  if (pct === 50) return { orden: `${p}1`, texto: `1er.50% ${mes}` };
+  if (pct === 100 && p !== String(numeroPlanilla)) return { orden: `${p}2`, texto: `2do.50% ${mes}` };
+  return { orden: `${p}0`, texto: `${pct}% ${mes}` };
+};
+
+const datosOficios = async (idPlanilla, opciones = {}) => {
+  const d = await getDepositos(idPlanilla, { banco: opciones.banco });
+  const { getNominaJubilados } = require("./impresiones.service");
+  const nomina = await getNominaJubilados(idPlanilla, {});
+  const periodosDe = new Map();
+  nomina.filas.forEach((f) => {
+    const k = `${Number(f.es_beneficiario) ? 1 : 0}|${f.codigo}`;
+    const e = etiquetaPeriodo(f, d.planilla.numero);
+    if (!e) return;
+    if (!periodosDe.has(k)) periodosDe.set(k, new Map());
+    periodosDe.get(k).set(e.orden, e.texto);
+  });
+
+  const filtroTipo = String(opciones.tipoJubilacion || "").trim().toUpperCase();
+  const grupos = new Map();
+  d.filas
+    .filter((f) => !["PAGO CON CHEQUE", "SIN DATOS DE PAGO"].includes(f.banco))
+    .forEach((f) => {
+      const esBen = Boolean(f.detalle);
+      const grupo = esBen ? BENEFICIARIOS : f.tipo_jubilacion;
+      if (filtroTipo && grupo !== filtroTipo && !(filtroTipo === BENEFICIARIOS && esBen)) return;
+      const k = `${f.banco}|${grupo}`;
+      if (!grupos.has(k)) grupos.set(k, { banco: f.banco, grupo, monto: 0, depositos: 0, periodos: new Map() });
+      const g = grupos.get(k);
+      g.monto = num(g.monto + f.monto);
+      g.depositos += 1;
+      (periodosDe.get(`${esBen ? 1 : 0}|${f.codigo}`) || new Map()).forEach((t, o) => g.periodos.set(o, t));
+    });
+  const lista = [...grupos.values()]
+    .map((g) => ({ ...g, periodos: [...g.periodos.entries()].sort((x, y) => x[0].localeCompare(y[0])).map(([, t]) => t) }))
+    .sort((x, y) => ordenBanco(x.banco) - ordenBanco(y.banco)
+      || (x.grupo === BENEFICIARIOS ? -1 : y.grupo === BENEFICIARIOS ? 1 : ordenTipo(x.grupo) - ordenTipo(y.grupo)));
+  return { planilla: d.planilla, oficios: lista };
+};
+
+// Vista previa para la pantalla: qué oficios salen, montos y datos del banco propuestos.
+const previewOficios = async (idPlanilla, opciones = {}) => {
+  const { planilla, oficios } = await datosOficios(idPlanilla, opciones);
+  const [firmantes] = await pool.query(
+    `SELECT CONCAT(jun_nombre, ' ', jun_apellidos) AS nombre, jun_puesto AS puesto
+       FROM RPJ_MNT_JUNTA_DIRECTIVA
+      WHERE jun_estado = 'ACTIVO' AND jun_tipo_junta = 'JUNTA ADMINISTRADORA'
+        AND jun_puesto IN ('PRESIDENTE', 'TESORERO TITULAR')
+      ORDER BY jun_puesto = 'TESORERO TITULAR'`
+  );
+  const bancos = [...new Set(oficios.map((o) => o.banco))];
+  return {
+    planilla,
+    oficios,
+    bancos: Object.fromEntries(bancos.map((b) => [b, DATOS_BANCO[b] || { nombre: b, agencia: "", direccion: "", cuenta: "" }])),
+    firmas: firmantes.map((f) => ({ nombre: f.nombre, cargo: f.puesto === "PRESIDENTE" ? "PRESIDENTE" : "TESORERO" }))
+  };
+};
+
+const parsearJson = (raw, def) => { try { return raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : def; } catch { return def; } };
+
+const pdfOficios = async (idPlanilla, opciones = {}, user) => {
+  const { planilla, oficios } = await datosOficios(idPlanilla, opciones);
+  if (!oficios.length) throw createError("No hay depósitos a cuenta para el filtro elegido", 409);
+  const datosBanco = parsearJson(opciones.bancos, {});
+  const conceptos = parsearJson(opciones.conceptos, {});
+  const firmas = parsearFirmas(opciones.firmas).filter((f) => f && (f.nombre || f.cargo)).slice(0, 3);
+  const fechaTxt = fechaCarta(opciones.fecha);
+
+  const doc = pdf.nuevoDoc({ size: "LETTER", layout: "portrait", margins: { top: 72, bottom: 60, left: 92, right: 92 } });
+  const x0 = doc.page.margins.left;
+  const ancho = pdf.anchoUtil(doc);
+  const N = "Helvetica-Oblique";
+  const B = "Helvetica-BoldOblique";
+  const TAM = 10.5;
+
+  oficios.forEach((o, i) => {
+    if (i > 0) doc.addPage();
+    const banco = { ...(DATOS_BANCO[o.banco] || { nombre: o.banco }), ...(datosBanco[o.banco] || {}) };
+    const periodos = String(conceptos[`${o.banco}|${o.grupo}`] || "").trim() || o.periodos.join(", ") || periodoTexto(planilla.numero);
+    const monto = `Q${o.monto.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    doc.y = 150;
+    doc.font(N).fontSize(TAM).fillColor("#000000")
+      .text("Puerto Quetzal,", x0, doc.y, { width: ancho, align: "center" })
+      .text(fechaTxt, { width: ancho, align: "center" });
+    doc.moveDown(2.5);
+    doc.text("Señores", x0, doc.y);
+    doc.font(B).text(banco.nombre || o.banco);
+    doc.font(N);
+    if (banco.agencia) doc.text(banco.agencia);
+    if (banco.direccion) doc.text(banco.direccion);
+    doc.text("Presente");
+    doc.moveDown(2);
+    doc.text("Estimados Señores:");
+    doc.moveDown(1);
+
+    const op = { width: ancho, align: "left", continued: true, lineGap: 1.5 };
+    const varios = periodos.includes("\n") || o.periodos.length > 1 && !conceptos[`${o.banco}|${o.grupo}`];
+    const lineas = varios ? (conceptos[`${o.banco}|${o.grupo}`] ? periodos.split(/\n/) : o.periodos) : [periodos];
+    doc.font(N).text(`Por este medio, autorizamos se sirvan debitar el ${fechaTxt}, de la cuenta No. ${banco.cuenta || "______________"} a nombre de Régimen de Pensiones y Jubilaciones del personal de la Empresa Portuaria Quetzal, y se acredite a `, x0, doc.y, op);
+    if (o.grupo === BENEFICIARIOS) {
+      doc.text("la cuenta correspondiente a los ", op).font(B).text("Beneficiarios", op)
+        .font(N).text(" de difuntos Jubilados por concepto de pago de pensiones correspondiente", op);
+    } else {
+      doc.text("las cuentas correspondientes del personal jubilado por ", op).font(B).text(o.grupo, op)
+        .font(N).text(" por concepto de pago de jubilación correspondiente", op);
+    }
+    // Un periodo: en la misma frase. Varios: uno por renglón, como en el oficio en papel.
+    if (varios) {
+      doc.text(":", { ...op, continued: false });
+      doc.moveDown(0.8);
+      lineas.filter((l) => l.trim()).forEach((l) => doc.text(l.trim(), x0, doc.y, { width: ancho }));
+      doc.moveDown(0.8);
+      doc.text(`Por un monto de: ${numeroALetras(o.monto)} `, x0, doc.y, op);
+    } else {
+      doc.text(` al ${periodos} por un monto de: ${numeroALetras(o.monto)} `, op);
+    }
+    doc.font(B).text(`(${monto})`, op)
+      .font(N).text(" adjuntando listado respectivo.", { ...op, continued: false });
+    doc.moveDown(1);
+    doc.text("Agradeciendo la atención a la presente, nos suscribimos.", x0, doc.y, { width: ancho });
+    doc.moveDown(1);
+    doc.text("Atentamente,");
+
+    // Firmas (hasta 3) en una fila.
+    const yF = Math.max(doc.y + 110, 600);
+    // Las firmas usan casi todo el ancho de la hoja para que el nombre quepa en un renglón.
+    const fx0 = 50;
+    const col = (doc.page.width - fx0 * 2) / Math.max(firmas.length, 1);
+    firmas.forEach((f, k) => {
+      const xc = fx0 + col * k;
+      doc.font(B).fontSize(TAM - 0.5).text(String(f.nombre || "").toUpperCase(), xc, yF, { width: col - 8, align: "center" });
+      doc.text(String(f.cargo || "").toUpperCase(), xc, doc.y, { width: col - 8, align: "center" });
+    });
+    doc.font(N).fontSize(TAM).text("c.c. Archivo", x0, yF + 60, { width: ancho });
+  });
+
+  logger.info("Oficios al banco", { idPlanilla, oficios: oficios.length, usuario: user?.usuario });
+  return { buffer: await pdf.aBuffer(doc), filename: `oficios_banco_${planilla.numero}.pdf` };
+};
+
+module.exports = { getDepositos, pdfDepositos, excelDepositos, planillas, previewOficios, pdfOficios };

@@ -20,6 +20,10 @@ router.get("/depositos-banco/:idPlanilla/pdf",
 router.get("/depositos-banco/:idPlanilla/excel",
   auditAction("IMPRESIONES", "DEPOSITOS_BANCO_EXCEL", (req) => `Exportar depósitos por banco de la planilla ${req.params.idPlanilla}`),
   controller.depositosExcel);
+router.get("/oficios-banco/:idPlanilla", controller.oficiosPreview);
+router.get("/oficios-banco/:idPlanilla/pdf",
+  auditAction("IMPRESIONES", "OFICIOS_BANCO_PDF", (req) => `Imprimir oficios al banco de la planilla ${req.params.idPlanilla}`),
+  controller.oficiosPdf);
 
 // --- Vistas previas en pantalla (JSON) --------------------------------------
 router.get("/nomina-sueldos/:idPlanilla", controller.previewNominaSueldos);
