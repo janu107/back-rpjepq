@@ -166,6 +166,7 @@ const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
 
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "NOMINA DE SUELDOS - EMPLEADOS DE REGIMEN",
+    institucion: pdf.INSTITUCION_CORTA,
     area: areaPedida || null,
     subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`
   });
@@ -191,7 +192,7 @@ const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
   }
 
   cierreNomina(doc, { total: sumar(filas, "liquido"), fechaPago: planilla.fechaPago, firmas });
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
 
   logger.info("Impresión de nómina de sueldos", { idPlanilla, empleados: filas.length, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `nomina_sueldos_${planilla.numero}.pdf` };
@@ -257,6 +258,7 @@ const pdfNominaTiempoExtra = async (idPlanilla, opciones = {}, user) => {
 
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "NOMINA DE TIEMPO EXTRAORDINARIO - EMPLEADOS DE REGIMEN",
+    institucion: pdf.INSTITUCION_CORTA,
     area: areaPedida || null,
     subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`
   });
@@ -280,7 +282,7 @@ const pdfNominaTiempoExtra = async (idPlanilla, opciones = {}, user) => {
   }
 
   cierreNomina(doc, { total: sumar(filas, "total"), fechaPago: planilla.fechaPago, firmas });
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
 
   logger.info("Impresión de nómina de tiempo extra", { idPlanilla, empleados: filas.length, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `nomina_tiempo_extra_${planilla.numero}.pdf` };
@@ -302,6 +304,7 @@ const pdfEstadoCuentaPrestamo = async (idPrestamo, opciones = {}, user) => {
 
   pdf.encabezado(doc, {
     titulo: "ESTADO DE CUENTA DE PRESTAMO",
+    institucion: pdf.INSTITUCION_CORTA,
     subtitulo: `${prestamo.cliente}   ·   Contrato ${prestamo.no_contrato}`
   });
 
@@ -364,7 +367,7 @@ const pdfEstadoCuentaPrestamo = async (idPrestamo, opciones = {}, user) => {
   doc.moveDown(1.2);
   doc.font("Helvetica").fontSize(7.5).text("ELABORADO:");
   doc.text(String(opciones.elaboradoPor || "Departamento de Credito"));
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
 
   logger.info("Impresión de estado de cuenta de préstamo", { idPrestamo, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `estado_cuenta_prestamo_${prestamo.no_contrato || idPrestamo}.pdf` };
@@ -420,7 +423,7 @@ const excelEstadoAportaciones = async (idAportacion) => {
       r.getCell(1).alignment = { horizontal: "center" };
     };
     t("REGIMEN DE PENSIONES Y JUBILACIONES", 13);
-    t("DEL PERSONAL DE LA EMPRESA PORTUARIA QUETZAL", 11);
+    t(pdf.INSTITUCION_CORTA, 11);
     t("ESTADO DE CUENTA DE APORTACIONES", 11);
     t(subtitulo, 9, false);
     ws.addRow([]);
@@ -503,6 +506,7 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
   const doc = pdf.nuevoDoc(detalle ? pdf.CARTA : { size: "LETTER", layout: "landscape", margin: 36 });
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "ESTADO DE CUENTA DE APORTACIONES",
+    institucion: pdf.INSTITUCION_CORTA,
     subtitulo: detalle ? "Detalle de aportes" : "Resumen por año y mes"
   });
   cabecera(doc);
@@ -662,7 +666,7 @@ const pdfEstadoAportaciones = async (idAportacion, opciones = {}, user) => {
     }
   }
 
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
   logger.info("Impresión de estado de cuenta de aportaciones", { idAportacion, movimientos: movimientos.length, formato: detalle ? "detalle" : "anual", usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `aportaciones_${empleado.codigo || idAportacion}${detalle ? "_detalle" : ""}.pdf` };
 };
@@ -719,6 +723,7 @@ const pdfResumen = async (query, user) => {
 
   pdf.encabezado(doc, {
     titulo: "REPORTE DE RESUMEN",
+    institucion: pdf.INSTITUCION_CORTA,
     subtitulo: tipoManejo === 1 ? "Empleados de régimen" : "Jubilados y pensionados",
     lineas: [`Pagos del ${fecha(desde)} al ${fecha(hasta)}`]
   });
@@ -761,7 +766,7 @@ const pdfResumen = async (query, user) => {
     doc.font("Helvetica-Oblique").fontSize(8).text("Sin movimientos en el rango indicado.");
   }
 
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
   logger.info("Impresión de resumen", { tipoManejo, desde, hasta, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `resumen_${tipoManejo === 1 ? "regimen" : "jubilados"}_${desde}_${hasta}.pdf` };
 };
@@ -803,6 +808,7 @@ const pdfNominaPrestamos = async (query, user) => {
 
   const cabecera = (d) => pdf.encabezado(d, {
     titulo: "NOMINA MENSUAL DE PRESTAMOS - EMPLEADOS EPQ",
+    institucion: pdf.INSTITUCION_CORTA,
     subtitulo: `Movimientos del ${fecha(query.desde)} al ${fecha(query.hasta)}`
   });
   cabecera(doc);
@@ -827,7 +833,7 @@ const pdfNominaPrestamos = async (query, user) => {
     { width: pdf.anchoUtil(doc) * 0.62 }
   );
   pdf.bloqueFirmas(doc, firmas);
-  pdf.pieDePagina(doc, user?.usuario);
+  pdf.marcaImpresion(doc);
 
   logger.info("Impresión de nómina de préstamos EPQ", { desde: query.desde, hasta: query.hasta, filas: filas.length, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `nomina_prestamos_${query.desde}_${query.hasta}.pdf` };

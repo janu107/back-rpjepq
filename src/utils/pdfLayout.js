@@ -213,6 +213,27 @@ const conMargenLateral = (doc, extra, dibujar) => {
   }
 };
 
+// Segunda línea del nombre institucional sin "DEL PERSONAL" (reportes de empleados y depósitos).
+const INSTITUCION_CORTA = "DE LA EMPRESA PORTUARIA QUETZAL";
+
+// Arriba a la izquierda, en letra pequeña: "Impresión: fecha hora" y "Página: n de N".
+// Reemplaza a pieDePagina en los reportes que la usan.
+const marcaImpresion = (doc) => {
+  const ahora = dayjs().format("DD/MM/YYYY HH:mm");
+  const paginas = doc.bufferedPageRange();
+  for (let i = 0; i < paginas.count; i += 1) {
+    doc.switchToPage(paginas.start + i);
+    const margenSup = doc.page.margins.top;
+    doc.page.margins.top = 0;
+    const x = doc.page.margins.left;
+    doc.font("Helvetica").fontSize(6.5).fillColor("#555555")
+      .text(`Impresión: ${ahora}`, x, 14, { lineBreak: false })
+      .text(`Página: ${i + 1} de ${paginas.count}`, x, 22, { lineBreak: false });
+    doc.page.margins.top = margenSup;
+  }
+  doc.fillColor("#000000");
+};
+
 const pieDePagina = (doc, usuario) => {
   const paginas = doc.bufferedPageRange();
   for (let i = 0; i < paginas.count; i += 1) {
@@ -236,5 +257,5 @@ module.exports = {
   buscarLogo,
   OFICIO, CARTA, num, q, fecha, fechaLarga,
   nuevoDoc, aBuffer, anchoUtil, repartirAnchos,
-  encabezado, dibujarTabla, filaTotales, bloqueFirmas, pieDePagina, conMargenLateral
+  encabezado, dibujarTabla, filaTotales, bloqueFirmas, pieDePagina, marcaImpresion, conMargenLateral, INSTITUCION_CORTA
 };
