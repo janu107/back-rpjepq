@@ -64,9 +64,8 @@ const pdfDepositos = async (idPlanilla, opciones = {}, user) => {
   const doc = pdf.nuevoDoc(pdf.CARTA);
   const ancho = pdf.anchoUtil(doc);
   const x0 = doc.page.margins.left;
-  const impreso = `Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)})  ·  Pago ${pdf.fecha(d.planilla.fechaPago)}  ·  Impreso el ${pdf.fecha(new Date())}`;
-  const filtros = [d.filtroTipo ? `Tipo de jubilación: ${d.filtroTipo}` : null, d.filtroBanco ? `Banco: ${d.filtroBanco}` : null].filter(Boolean);
-  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso, lineas: filtros.length ? [filtros.join("   ·   ")] : [] });
+  const impreso = `Planilla ${d.planilla.numero} (${periodoTexto(d.planilla.numero)})  ·  Pago ${pdf.fecha(d.planilla.fechaPago)}`;
+  const cabecera = (titulo, area) => (doc2) => pdf.encabezado(doc2, { titulo, area, subtitulo: impreso });
   let primera = true;
   const nuevaHoja = (fn) => { if (!primera) doc.addPage(); primera = false; fn(doc); };
 
@@ -190,7 +189,20 @@ const pdfDepositos = async (idPlanilla, opciones = {}, user) => {
     pdf.bloqueFirmas(doc, firmas);
   }
 
-  pdf.pieDePagina(doc, user?.usuario);
+  // Arriba a la izquierda, en letra pequeña: fecha/hora de impresión y página.
+  const ahora = new Date();
+  const hora = `${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}`;
+  const rango = doc.bufferedPageRange();
+  for (let i = rango.start; i < rango.start + rango.count; i += 1) {
+    doc.switchToPage(i);
+    const margenSup = doc.page.margins.top;
+    doc.page.margins.top = 0;
+    doc.font("Helvetica").fontSize(6.5).fillColor("#555555")
+      .text(`Impresión: ${pdf.fecha(ahora)} ${hora}`, x0, 14, { lineBreak: false })
+      .text(`Página: ${i - rango.start + 1} de ${rango.count}`, x0, 22, { lineBreak: false });
+    doc.page.margins.top = margenSup;
+  }
+  doc.fillColor("#000000");
   logger.info("Reporte de depósitos por banco", { idPlanilla, seccion, banco: d.filtroBanco, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `${seccion === "resumen" ? "resumen_depositos" : "depositos"}_${d.planilla.numero}.pdf` };
 };
