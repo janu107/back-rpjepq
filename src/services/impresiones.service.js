@@ -108,8 +108,9 @@ const cierreNomina = (doc, { total, fechaPago, firmas }) => {
 // ---------------------------------------------------------------------------
 // 14. Nómina de sueldos de empleados de régimen (oficio, por área)
 // ---------------------------------------------------------------------------
+const LETRA_SUELDOS = 7.5;
 const COLS_SUELDOS = (doc) => {
-  const anchos = pdf.repartirAnchos(doc, [3, 18, 4, 7, 4, 15, 8, 8, 8, 7, 7, 8, 8, 9]);
+  const anchos = pdf.repartirAnchos(doc, [3, 23, 4, 7, 3, 11, 8, 8, 8, 7, 6, 8, 8, 9]);
   const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
   return [
     c("No.", "no", "right", 0),
@@ -176,19 +177,19 @@ const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
   grupos.forEach(([area, filasArea], idx) => {
     if (idx > 0) doc.moveDown(0.8);
     if (porArea) {
-      doc.font("Helvetica-Bold").fontSize(8).text(`AREA: ${area}`);
+      doc.font("Helvetica-Bold").fontSize(9).text(`AREA: ${area}`);
       doc.moveDown(0.15);
     }
     const numeradas = filasArea.map((f, i) => ({
       ...f, no: i + 1, areaCorta: (f.area || "").slice(0, 3)
     }));
-    pdf.dibujarTabla(doc, columnas, numeradas, { fuente: 6, alturaFila: 11, reservaInferior: 70, alRepetirEncabezado: cabecera });
-    pdf.filaTotales(doc, columnas, totalesSueldos(filasArea), porArea ? `TOTAL ${area}` : "TOTALES");
+    pdf.dibujarTabla(doc, columnas, numeradas, { fuente: LETRA_SUELDOS, alturaFila: 13, altoEncabezado: 24, reservaInferior: 70, alRepetirEncabezado: cabecera });
+    pdf.filaTotales(doc, columnas, totalesSueldos(filasArea), porArea ? `TOTAL ${area}` : "TOTALES", 3, { fuente: LETRA_SUELDOS });
   });
 
   if (porArea && grupos.length > 1) {
     doc.moveDown(0.4);
-    pdf.filaTotales(doc, columnas, totalesSueldos(filas), "TOTAL GENERAL");
+    pdf.filaTotales(doc, columnas, totalesSueldos(filas), "TOTAL GENERAL", 3, { fuente: LETRA_SUELDOS });
   }
 
   cierreNomina(doc, { total: sumar(filas, "liquido"), fechaPago: planilla.fechaPago, firmas });
@@ -196,6 +197,107 @@ const pdfNominaSueldos = async (idPlanilla, opciones = {}, user) => {
 
   logger.info("Impresión de nómina de sueldos", { idPlanilla, empleados: filas.length, usuario: user?.usuario });
   return { buffer: await pdf.aBuffer(doc), filename: `nomina_sueldos_${planilla.numero}.pdf` };
+};
+
+// Nómina de sueldos en Excel: mismo formato que el PDF (encabezado, grupos por
+// área, mismas columnas, subtotales, total general y monto en letras).
+const excelNominaSueldos = async (idPlanilla, opciones = {}) => {
+  const ExcelJS = require("exceljs");
+  const { planilla, filas: todas } = await getNominaSueldos(idPlanilla);
+  if (!todas.length) throw createError("La planilla no tiene renglones de empleados para exportar", 409);
+  const areaPedida = String(opciones.area || "").trim().toUpperCase();
+  const filas = areaPedida ? todas.filter((f) => String(f.area).toUpperCase() === areaPedida) : todas;
+  if (!filas.length) throw createError(`La planilla no tiene empleados del área ${areaPedida}`, 409);
+
+  const columnas = [
+    { titulo: "No.", campo: "no", ancho: 5 },
+    { titulo: "NOMBRES Y APELLIDOS", campo: "nombre", ancho: 38 },
+    { titulo: "AREA", campo: "areaCorta", ancho: 7, centro: true },
+    { titulo: "F. INICIO", campo: "fecha_inicio_labor", ancho: 12, fecha: true },
+    { titulo: "DIAS", campo: "dias", ancho: 6, centro: true },
+    { titulo: "CARGO", campo: "cargo", ancho: 28 },
+    { titulo: "SUELDO MENSUAL", campo: "sueldo", ancho: 14, monto: true },
+    { titulo: "BONIF. INCENTIVO", campo: "bonif_incentivo", ancho: 13, monto: true },
+    { titulo: "BONIF. PROD. Y EFIC.", campo: "bonif_productividad", ancho: 13, monto: true },
+    { titulo: "I.G.S.S.", campo: "igss", ancho: 12, monto: true },
+    { titulo: "I.S.R.", campo: "isr", ancho: 12, monto: true },
+    { titulo: "SEG. JUD. Y OTROS", campo: "judicial_otros", ancho: 13, monto: true },
+    { titulo: "PRESTAMOS", campo: "prestamos", ancho: 13, monto: true },
+    { titulo: "LIQUIDO A RECIBIR", campo: "liquido", ancho: 15, monto: true }
+  ];
+  const n = columnas.length;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "RPJEPQ";
+  const ws = wb.addWorksheet("Nomina Sueldos", { pageSetup: { paperSize: 5, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  columnas.forEach((c, k) => { ws.getColumn(k + 1).width = c.ancho; });
+
+  const titulo = (texto, tam, negrita = true) => {
+    const r = ws.addRow([texto]);
+    ws.mergeCells(r.number, 1, r.number, n);
+    r.getCell(1).font = { bold: negrita, size: tam };
+    r.getCell(1).alignment = { horizontal: "center" };
+  };
+  titulo("REGIMEN DE PENSIONES Y JUBILACIONES", 13);
+  titulo(pdf.INSTITUCION_CORTA, 11);
+  titulo("NOMINA DE SUELDOS - EMPLEADOS DE REGIMEN", 11);
+  if (areaPedida) titulo(areaPedida, 11);
+  titulo(`Planilla ${planilla.numero}  ·  Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}  ·  Pago ${fecha(planilla.fechaPago)}`, 9, false);
+  ws.addRow([]);
+
+  const FORMATO = "#,##0.00";
+  const pintar = (r, argb, fuenteBlanca) => r.eachCell({ includeEmpty: true }, (cell, k) => {
+    if (k > n) return;
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+    cell.font = { bold: true, color: { argb: fuenteBlanca ? "FFFFFFFF" : "FF000000" }, size: 10 };
+  });
+  const encabezadoTabla = () => {
+    const r = ws.addRow(columnas.map((c) => c.titulo));
+    pintar(r, "FF1F4E5F", true);
+    r.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    r.height = 30;
+  };
+  const filaTotal = (etiqueta, lista) => {
+    const valores = columnas.map((c) => (c.monto ? lista.reduce((s2, f) => s2 + Number(f[c.campo] || 0), 0) : null));
+    valores[0] = etiqueta;
+    const r = ws.addRow(valores);
+    ws.mergeCells(r.number, 1, r.number, 6);
+    pintar(r, "FFDDE3EA");
+    columnas.forEach((c, k) => { if (c.monto) r.getCell(k + 1).numFmt = FORMATO; });
+  };
+
+  const porArea = !areaPedida && String(opciones.porArea ?? "true") !== "false";
+  const grupos = porArea ? agruparPorArea(filas) : [["", filas]];
+  grupos.forEach(([area, lista], idx) => {
+    if (idx > 0) ws.addRow([]);
+    if (porArea) { const r = ws.addRow([`AREA: ${area}`]); r.getCell(1).font = { bold: true, size: 11 }; }
+    encabezadoTabla();
+    lista.forEach((f, k) => {
+      const fila = { ...f, no: k + 1, areaCorta: (f.area || "").slice(0, 3) };
+      const r = ws.addRow(columnas.map((c) => {
+        if (c.fecha) return fila[c.campo] ? fecha(fila[c.campo]) : "";
+        return c.monto ? Number(fila[c.campo] || 0) : fila[c.campo];
+      }));
+      r.font = { size: 10 };
+      columnas.forEach((c, j) => {
+        if (c.monto) r.getCell(j + 1).numFmt = FORMATO;
+        if (c.fecha || c.centro) r.getCell(j + 1).alignment = { horizontal: "center" };
+      });
+      if (k % 2 === 1) r.eachCell({ includeEmpty: true }, (cell, j) => { if (j <= n) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F6F8" } }; });
+    });
+    filaTotal(porArea ? `TOTAL ${area}` : "TOTALES", lista);
+  });
+  if (porArea && grupos.length > 1) { ws.addRow([]); filaTotal("TOTAL GENERAL", filas); }
+
+  ws.addRow([]);
+  const letras = ws.addRow([`LA PRESENTE PLANILLA ASCIENDE A LA CANTIDAD DE ${numeroALetras(sumar(filas, "liquido"))}`]);
+  ws.mergeCells(letras.number, 1, letras.number, n);
+  letras.getCell(1).font = { size: 10 };
+  const lugar = ws.addRow([`PUERTO QUETZAL, ${fechaLarga(planilla.fechaPago)}`]);
+  ws.mergeCells(lugar.number, 1, lugar.number, n);
+  lugar.getCell(1).font = { size: 10 };
+
+  const sufijo = areaPedida ? `_${areaPedida.toLowerCase().replace(/\s+/g, "_")}` : "";
+  return { buffer: await wb.xlsx.writeBuffer(), filename: `nomina_sueldos_${planilla.numero}${sufijo}.xlsx` };
 };
 
 // ---------------------------------------------------------------------------
@@ -1207,6 +1309,7 @@ module.exports = {
   excelEstadoAportaciones,
   getNominaSueldos,
   pdfNominaSueldos,
+  excelNominaSueldos,
   getNominaTiempoExtra,
   pdfNominaTiempoExtra,
   getEstadoCuentaPrestamo,

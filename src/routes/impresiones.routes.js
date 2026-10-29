@@ -36,6 +36,10 @@ router.get("/nomina-sueldos/:idPlanilla/pdf",
   auditAction("IMPRESIONES", "NOMINA_SUELDOS_PDF", (req) => `Imprimir nómina de sueldos de la planilla ${req.params.idPlanilla}`),
   controller.pdfNominaSueldos);
 
+router.get("/nomina-sueldos/:idPlanilla/excel",
+  auditAction("IMPRESIONES", "NOMINA_SUELDOS_EXCEL", (req) => `Exportar a Excel la nómina de sueldos de la planilla ${req.params.idPlanilla}`),
+  controller.excelNominaSueldos);
+
 router.get("/nomina-tiempo-extra/:idPlanilla/pdf",
   auditAction("IMPRESIONES", "NOMINA_TIEMPO_EXTRA_PDF", (req) => `Imprimir nómina de tiempo extra de la planilla ${req.params.idPlanilla}`),
   controller.pdfNominaTiempoExtra);

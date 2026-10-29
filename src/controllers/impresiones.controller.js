@@ -48,10 +48,11 @@ const enviarArchivo = (res, { buffer, filename }, tipo) => {
 const depositosPlanillas = async (req, res, next) => { try { return successResponse(res, await depositos.planillas(), "Planillas de jubilados"); } catch (e) { next(e); } };
 const depositosPreview = async (req, res, next) => { try { const d = await depositos.getDepositos(req.params.idPlanilla, req.query); return successResponse(res, { planilla: d.planilla, bancos: d.bancos, tipos: d.tipos, matriz: d.matriz, totalBanco: d.totalBanco, total: d.total, depositos: d.filas.length }, "Depósitos por banco"); } catch (e) { next(e); } };
 const depositosPdf = async (req, res, next) => { try { return enviarPdf(res, await depositos.pdfDepositos(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
+const excelNominaSueldos = async (req, res, next) => { try { return enviarArchivo(res, await service.excelNominaSueldos(req.params.idPlanilla, req.query), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
 const depositosExcel = async (req, res, next) => { try { return enviarArchivo(res, await depositos.excelDepositos(req.params.idPlanilla, req.query), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
 
 module.exports = {
-  depositosPlanillas, depositosPreview, depositosPdf, depositosExcel,
+  depositosPlanillas, depositosPreview, depositosPdf, depositosExcel, excelNominaSueldos,
   opciones,
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,
   previewEstadoAportaciones, previewNominaJubilados, previewResumenJubilados,
