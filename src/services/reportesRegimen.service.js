@@ -104,10 +104,39 @@ const getJuntaDirectiva = async () => {
   return rows.map(mapJunta);
 };
 
+const MESES_DIETA = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+
+// Una línea por miembro y mes. Si a alguien ya se le pagó y después se aprobó otra
+// sesión del mismo mes, el módulo crea un segundo pago pendiente (para no tocar lo
+// pagado); en el reporte se suman ambos y el estado queda PARCIAL.
 const getDietas = async () => {
   logger.info("Reporte dietas solicitado");
   const [rows] = await pool.query(sql("reporteDietas"));
-  return rows.map(mapDieta);
+  const grupos = new Map();
+  rows.map((r) => ({ ...mapDieta(r), idMiembro: r.vdi_id_junta_directiva })).forEach((d) => {
+    const clave = `${d.idMiembro}|${d.periodo}`;
+    const g = grupos.get(clave);
+    if (!g) {
+      const [anio, mes] = String(d.periodo || "").split("-");
+      grupos.set(clave, {
+        ...d, id: clave, pagos: 1, estados: new Set([d.estado]),
+        anio: anio || "", mes: mes ? `${mes} - ${MESES_DIETA[Number(mes) - 1] || ""}` : ""
+      });
+      return;
+    }
+    g.pagos += 1;
+    g.sesionesMes = Number(g.sesionesMes || 0) + Number(d.sesionesMes || 0);
+    g.valor = Math.round((g.valor + d.valor) * 100) / 100;
+    g.retencionIsr = Math.round((g.retencionIsr + d.retencionIsr) * 100) / 100;
+    g.liquido = Math.round((g.liquido + d.liquido) * 100) / 100;
+    g.estados.add(d.estado);
+    if (d.fechaPago && (!g.fechaPago || new Date(d.fechaPago) > new Date(g.fechaPago))) g.fechaPago = d.fechaPago;
+  });
+  return [...grupos.values()]
+    .map(({ estados, ...g }) => ({ ...g, estado: estados.size > 1 ? "PARCIAL" : [...estados][0] }))
+    .sort((x, y) => String(y.periodo).localeCompare(String(x.periodo))
+      || String(x.tipoJunta || "").localeCompare(String(y.tipoJunta || ""))
+      || String(x.miembroNombre || "").localeCompare(String(y.miembroNombre || "")));
 };
 
 const getEmpleadosRegimen = async () => {

@@ -1,6 +1,7 @@
 -- Reporte de Pago de Dietas (modelo vdi_*: encabezado de pago mensual por miembro).
 SELECT
   d.vdi_correlativo,
+  d.vdi_id_junta_directiva,
   d.vdi_periodo,
   d.vdi_fecha_pago,
   d.vdi_total_sesiones,
