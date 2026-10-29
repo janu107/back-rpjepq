@@ -841,11 +841,18 @@ const pdfNominaPrestamos = async (query, user) => {
 // seguro (existe la bandera dat_aplica_seguro en datos de planilla, pero ningún
 // SP genera ese renglón). Mientras no exista el tipo, la columna saldría en cero.
 // ---------------------------------------------------------------------------
+// "VIUDEZ" incluye a "VIUDEZ (DEUDA)" (la esposa que cobra la deuda del
+// fallecido) y "ORFANDAD" a "ORFANDAD (LIQ.)".
+const mismoTipo = (valor, tipo) => {
+  const v = String(valor || "").toUpperCase();
+  return v === tipo || v.startsWith(`${tipo} (`);
+};
+
 const getNominaJubilados = async (idPlanilla, opciones = {}) => {
   const planilla = await getPlanilla(idPlanilla);
   const [rows] = await pool.execute(sql("nominaJubilados"), [idPlanilla, idPlanilla, idPlanilla]);
   const tipo = String(opciones.tipoJubilacion || "").trim().toUpperCase();
-  const filas = tipo ? rows.filter((r) => String(r.tipo_jubilacion).toUpperCase() === tipo) : rows;
+  const filas = tipo ? rows.filter((r) => mismoTipo(r.tipo_jubilacion, tipo)) : rows;
   return { planilla, filas, tipoJubilacion: tipo || null };
 };
 
@@ -965,10 +972,10 @@ const getResumenJubilados = async (idPlanilla, opciones = {}) => {
   const planilla = await getPlanilla(idPlanilla);
   const tipo = String(opciones.tipoJubilacion || "").trim().toUpperCase() || null;
   const [[pensionesTodas], [remesas]] = await Promise.all([
-    pool.execute(sql("resumenJubiladosPensiones"), [idPlanilla, idPlanilla]),
+    pool.execute(sql("resumenJubiladosPensiones"), [idPlanilla, idPlanilla, idPlanilla]),
     pool.execute(sql("resumenJubiladosRemesas"), [idPlanilla, tipo, tipo])
   ]);
-  const pensiones = tipo ? pensionesTodas.filter((p) => String(p.tipo_jubilacion).toUpperCase() === tipo) : pensionesTodas;
+  const pensiones = tipo ? pensionesTodas.filter((p) => mismoTipo(p.tipo_jubilacion, tipo)) : pensionesTodas;
   return { planilla, pensiones, remesas, tipoJubilacion: tipo };
 };
 
