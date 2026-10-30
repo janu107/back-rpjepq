@@ -86,11 +86,12 @@ const deudaTotal = async (id) => {
 const mapBen = (b) => ({
   id: b.id, tipoParentesco: b.tipoParentesco, nombres: b.nombres, apellidos: b.apellidos,
   dpi: b.dpi, fechaNacimiento: b.fechaNacimiento, porcentaje: toNum(b.porcentaje), estado: b.estado,
+  monto: b.monto === null || b.monto === undefined ? null : toNum(b.monto),
   tieneTutora: Number(b.tutores) > 0
 });
 const SELECT_BEN = `SELECT ben_correlativo AS id, ben_tipo_parentesco AS tipoParentesco, ben_nombres AS nombres,
   ben_apellidos AS apellidos, ben_dpi AS dpi, ben_fecha_nacimiento AS fechaNacimiento,
-  ben_porcentaje AS porcentaje, ben_estado AS estado,
+  ben_porcentaje AS porcentaje, ben_monto AS monto, ben_estado AS estado,
   (SELECT COUNT(*) FROM RPJ_MNT_TUTOR t WHERE t.tut_id_beneficiario = ben_correlativo) AS tutores
   FROM RPJ_MNT_BENEFICIARIO`;
 
@@ -133,8 +134,16 @@ const resumenFinanciero = async (id) => {
       WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
         AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'`, [id, id]
   );
+  let fallecimiento = null;
+  if (jub.estadoPago === "FALLECIDO") {
+    const [[fx]] = await pool.execute(
+      "SELECT jub_fecha_fallecimiento AS fecha, jub_no_defuncion AS certificado FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]
+    );
+    fallecimiento = { fecha: fx?.fecha || null, certificado: fx?.certificado || null, cancelacion: await cancelacionVigente(id) };
+  }
   return {
     ...mapJubBusqueda(jub),
+    fallecimiento,
     pension: toNum(pen ? pen.pension : 0),
     deudaPendiente: toNum(deu.deudaPendiente),
     periodosDeuda: toNum(deu.periodosDeuda),
@@ -204,7 +213,7 @@ const historiaCompleta = async (id) => {
             MAX(x.deuda_pagada) AS deudaPagada, MAX(x.deuda_pendiente) AS deudaPendiente,
             MAX(x.deuda_estado) AS deudaEstado, MAX(x.deuda_planilla) AS deudaPlanilla,
             SUM(x.descuentos) AS descuentos, MAX(x.detalle_desc) AS detalleDescuentos,
-            MAX(x.en_proceso) AS enProceso, MAX(x.pagado_con) AS pagadoCon
+            MAX(x.en_proceso) AS enProceso, MAX(x.pagado_con) AS pagadoCon, MAX(x.cancelada_doc) AS canceladaDoc
        FROM (
          SELECT p.ppl_numero AS periodo, i.nin_valor_teorico AS pension, i.nin_porcentaje_aplicado AS porcentaje,
                 i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
@@ -217,7 +226,7 @@ const historiaCompleta = async (id) => {
                    FROM RPJ_PRC_NOMINA_DESCUENTO dd LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_id = dd.nde_tipo_descuento
                   WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado) AS detalle_desc,
                 IF(p.ppl_estado_proceso = 'GENERADA', 1, 0) AS en_proceso,
-                NULL AS pagado_con
+                NULL AS pagado_con, NULL AS cancelada_doc
            FROM RPJ_PRC_NOMINA_INGRESO i
            INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
           WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
@@ -229,7 +238,10 @@ const historiaCompleta = async (id) => {
                 -- Planillas (nóminas cerradas) que abonaron a la deuda de este mes.
                 (SELECT GROUP_CONCAT(DISTINCT pa.ppl_numero ORDER BY pa.ppl_numero SEPARATOR ',')
                    FROM RPJ_PRC_APLICACION_PAGO a JOIN RPJ_CAT_PARAMETRO_PLANILLA pa ON pa.ppl_correlativo = a.apa_id_planilla
-                  WHERE a.apa_id_deuda = d.deu_correlativo) AS pagado_con
+                  WHERE a.apa_id_deuda = d.deu_correlativo) AS pagado_con,
+                (SELECT MAX(c.cde_documento) FROM RPJ_PRC_CANCELACION_DEUDA_DET cd
+                   JOIN RPJ_PRC_CANCELACION_DEUDA c ON c.cde_correlativo = cd.cdd_id_cancelacion AND c.cde_estado = 'VIGENTE'
+                  WHERE cd.cdd_id_deuda = d.deu_correlativo) AS cancelada_doc
            FROM RPJ_PRC_DEUDA_JUBILADO d
           WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL
        ) x
@@ -246,6 +258,8 @@ const historiaCompleta = async (id) => {
     const sumaGrupos = Object.values(grupos).reduce((a, b) => a + b, 0);
     const resto = Math.round((fila.descuentos - sumaGrupos) * 100) / 100;
     if (resto > 0) grupos.otros = Math.round((grupos.otros + resto) * 100) / 100;
+    // Meses de la deuda que se pagaron fuera del sistema (cancelación registrada).
+    if (r.canceladaDoc) return { ...fila, desglose: grupos, estado: "CANCELADA", canceladaFuera: r.canceladaDoc };
     return { ...fila, desglose: grupos };
   });
 };
@@ -358,12 +372,28 @@ const listarFallecidos = async () => {
             (SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero SEPARATOR ', ')
                FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
               WHERE i.nin_id_jubilado = j.jub_correlativo AND i.nin_id_beneficiario IS NOT NULL
-                AND p.ppl_estado_proceso = 'GENERADA') AS planillasGeneradas
+                AND p.ppl_estado_proceso = 'GENERADA') AS planillasGeneradas,
+            (SELECT COALESCE(SUM(d.deu_monto_pendiente), 0) FROM RPJ_PRC_DEUDA_JUBILADO d
+              WHERE d.deu_id_jubilado = j.jub_correlativo AND d.deu_estado IN ('PENDIENTE','PARCIAL')) AS deudaPendiente,
+            (SELECT COUNT(*) FROM RPJ_PRC_DEUDA_JUBILADO d
+              WHERE d.deu_id_jubilado = j.jub_correlativo AND d.deu_estado IN ('PENDIENTE','PARCIAL') AND d.deu_monto_pendiente > 0) AS mesesPendientes
        FROM RPJ_MNT_JUBILADO j
       WHERE j.jub_estado_pago = 'FALLECIDO'
       ORDER BY j.jub_fecha_fallecimiento DESC, nombre`
   );
-  return rows.map((r) => ({ ...r, beneficiarios: toNum(r.beneficiarios), editable: !r.planillasCerradas }));
+  const [cans] = await pool.query(
+    `SELECT cde_correlativo AS id, cde_id_jubilado AS idJubilado, cde_fecha AS fecha, cde_documento AS documento,
+            cde_monto AS monto, cde_meses AS meses, cde_observaciones AS observaciones
+       FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_estado = 'VIGENTE'`
+  );
+  return rows.map((r) => {
+    const c = cans.find((x) => Number(x.idJubilado) === Number(r.id));
+    return {
+      ...r, beneficiarios: toNum(r.beneficiarios), editable: !r.planillasCerradas,
+      deudaPendiente: toNum(r.deudaPendiente), mesesPendientes: toNum(r.mesesPendientes),
+      cancelacion: c ? { ...c, monto: toNum(c.monto), meses: toNum(c.meses) } : null
+    };
+  });
 };
 
 const estadoFallecido = async (id) => {
@@ -401,6 +431,7 @@ const corregirFallecimiento = async (id, body, currentUser) => {
 
 const revertirFallecimiento = async (id, body, currentUser) => {
   const f = await estadoFallecido(id);
+  if (f.cancelacion) throw createError("Primero revierta la cancelación de su deuda (registrada fuera del sistema)", 409);
   if (f.planillasGeneradas) {
     throw createError(`Primero reverse la planilla ${f.planillasGeneradas}: ya está GENERADA con sus beneficiarios`, 409);
   }
@@ -424,6 +455,136 @@ const revertirFallecimiento = async (id, body, currentUser) => {
   }
   logger.info("Fallecimiento revertido", { idJubilado: id, motivo: body?.motivo, usuario: currentUser?.usuario });
   return { id: Number(id), estadoPago: "ACTIVO" };
+};
+
+// ---------------------------------------------------------------------------
+// Deuda del fallecido pagada FUERA del sistema (p. ej. se le pagó a la viuda antes
+// de usar este sistema). Sus meses pendientes quedan PAGADOS, se guarda el detalle
+// para poder revertir, y la esposa pasa de "cobro de deuda" a VIUDEZ. Si hay una
+// planilla de jubilados GENERADA, sus renglones de beneficiarios se recalculan.
+// ---------------------------------------------------------------------------
+const cancelacionVigente = async (idJubilado, executor = pool) => {
+  const [[c]] = await executor.query(
+    `SELECT cde_correlativo AS id, cde_fecha AS fecha, cde_documento AS documento, cde_monto AS monto, cde_meses AS meses,
+            cde_observaciones AS observaciones, cde_fecha_creacion AS registrada, cde_usuario_creacion AS usuario
+       FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_id_jubilado = ? AND cde_estado = 'VIGENTE'
+      ORDER BY cde_correlativo DESC LIMIT 1`, [idJubilado]
+  );
+  return c ? { ...c, monto: toNum(c.monto), meses: toNum(c.meses) } : null;
+};
+
+// Recalcula los beneficiarios de las planillas de jubilados GENERADAS (sin cerrar).
+const recalcularBeneficiariosGenerados = async (conn, usuario) => {
+  const [pls] = await conn.query(
+    "SELECT ppl_correlativo AS id, ppl_numero AS numero FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso = 'GENERADA'"
+  );
+  for (const p of pls) await conn.query("CALL sp_generar_beneficiarios_planilla(?, ?, @bp, @bt)", [p.id, usuario]);
+  return pls.map((p) => p.numero);
+};
+
+const cancelarDeudaFallecido = async (id, body, currentUser) => {
+  const [[jub]] = await pool.execute(
+    "SELECT jub_estado_pago AS estadoPago, CONCAT(jub_nombres, ' ', jub_apellidos) AS nombre FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]
+  );
+  if (!jub) throw createError("Jubilado no encontrado", 404);
+  if (jub.estadoPago !== "FALLECIDO") throw createError("Solo se cancela la deuda de un jubilado registrado como fallecido", 409);
+  const fecha = String(body?.fecha || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("Indique la fecha en que se pagó");
+  if (fecha > new Date().toISOString().slice(0, 10)) throw createError("La fecha no puede ser futura");
+  const documento = String(body?.documento || "").trim();
+  if (!documento) throw createError("Indique el documento que respalda el pago (resolución, acta, cheque, etc.)");
+  const usuario = currentUser?.usuario || "sistema";
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    if (await cancelacionVigente(id, conn)) throw createError("La deuda de este jubilado ya está registrada como cancelada", 409);
+    const [meses] = await conn.query(
+      `SELECT deu_correlativo AS id, deu_periodo AS periodo, deu_monto_pendiente AS pendiente
+         FROM RPJ_PRC_DEUDA_JUBILADO
+        WHERE deu_id_jubilado = ? AND deu_estado IN ('PENDIENTE','PARCIAL') AND deu_monto_pendiente > 0
+        ORDER BY deu_periodo FOR UPDATE`, [id]
+    );
+    if (!meses.length) throw createError("El jubilado no tiene deuda pendiente", 409);
+    const total = Math.round(meses.reduce((a, m) => a + toNum(m.pendiente), 0) * 100) / 100;
+    const [res] = await conn.execute(
+      `INSERT INTO RPJ_PRC_CANCELACION_DEUDA (cde_id_jubilado, cde_fecha, cde_documento, cde_observaciones, cde_monto, cde_meses, cde_usuario_creacion)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, fecha, documento.slice(0, 100), String(body?.observaciones || "").trim().slice(0, 500) || null, total, meses.length, usuario]
+    );
+    const nota = `Cancelada fuera del sistema (${documento.slice(0, 60)})`;
+    for (const m of meses) {
+      await conn.execute(
+        "INSERT INTO RPJ_PRC_CANCELACION_DEUDA_DET (cdd_id_cancelacion, cdd_id_deuda, cdd_periodo, cdd_monto) VALUES (?, ?, ?, ?)",
+        [res.insertId, m.id, m.periodo, toNum(m.pendiente)]
+      );
+      await conn.execute(
+        `UPDATE RPJ_PRC_DEUDA_JUBILADO
+            SET deu_monto_pagado = deu_monto_pagado + deu_monto_pendiente, deu_monto_pendiente = 0,
+                deu_estado = 'PAGADA', deu_fecha_saldada = ?,
+                deu_observaciones = LEFT(CONCAT(COALESCE(CONCAT(deu_observaciones, ' | '), ''), ?), 250)
+          WHERE deu_correlativo = ?`, [fecha, nota, m.id]
+      );
+    }
+    const recalculadas = await recalcularBeneficiariosGenerados(conn, usuario);
+    await conn.commit();
+    logger.info("Deuda de fallecido cancelada fuera del sistema", { idJubilado: id, total, meses: meses.length, documento, usuario });
+    return { id: Number(id), total, meses: meses.length, planillasRecalculadas: recalculadas };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+// Revierte la cancelación: los meses vuelven a quedar pendientes. No se permite si
+// ya se cerró una planilla de jubilados después de registrarla (ya se pagó viudez).
+const revertirCancelacionDeuda = async (id, body, currentUser) => {
+  const usuario = currentUser?.usuario || "sistema";
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const c = await cancelacionVigente(id, conn);
+    if (!c) throw createError("Este jubilado no tiene una cancelación de deuda vigente", 404);
+    const [[cer]] = await conn.query(
+      `SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero) AS planillas
+         FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+        WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NOT NULL AND p.ppl_estado_proceso = 'CERRADA'
+          AND p.ppl_fecha_cierre >= ?`, [id, c.registrada]
+    );
+    if (cer?.planillas) {
+      throw createError(`Ya se cerró la planilla ${cer.planillas} con sus beneficiarios después de registrar la cancelación: no se puede revertir`, 409);
+    }
+    const [det] = await conn.query("SELECT cdd_id_deuda AS idDeuda, cdd_monto AS monto FROM RPJ_PRC_CANCELACION_DEUDA_DET WHERE cdd_id_cancelacion = ?", [c.id]);
+    for (const d of det) {
+      await conn.execute(
+        `UPDATE RPJ_PRC_DEUDA_JUBILADO
+            SET deu_monto_pagado = deu_monto_pagado - ?, deu_monto_pendiente = deu_monto_pendiente + ?, deu_fecha_saldada = NULL
+          WHERE deu_correlativo = ?`, [toNum(d.monto), toNum(d.monto), d.idDeuda]
+      );
+      // El estado se recalcula aparte, con los montos ya actualizados.
+      await conn.execute(
+        `UPDATE RPJ_PRC_DEUDA_JUBILADO
+            SET deu_estado = CASE WHEN deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
+          WHERE deu_correlativo = ?`, [d.idDeuda]
+      );
+    }
+    await conn.execute(
+      `UPDATE RPJ_PRC_CANCELACION_DEUDA SET cde_estado = 'REVERTIDA', cde_fecha_reversion = NOW(), cde_usuario_reversion = ?,
+              cde_observaciones = LEFT(CONCAT(COALESCE(CONCAT(cde_observaciones, ' | '), ''), 'Revertida: ', ?), 500)
+        WHERE cde_correlativo = ?`, [usuario, String(body?.motivo || "sin motivo").slice(0, 200), c.id]
+    );
+    const recalculadas = await recalcularBeneficiariosGenerados(conn, usuario);
+    await conn.commit();
+    logger.info("Cancelación de deuda revertida", { idJubilado: id, cancelacion: c.id, usuario });
+    return { id: Number(id), planillasRecalculadas: recalculadas };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
 };
 
 // PDF de estado de cuenta (carta). Mismo estilo de los reportes formales
@@ -544,7 +705,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
 };
 
 module.exports = {
-  listarFallecidos, corregirFallecimiento, revertirFallecimiento,
+  listarFallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeudaFallecido, revertirCancelacionDeuda,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, registrarFallecimiento,
   generarEstadoCuentaPdf

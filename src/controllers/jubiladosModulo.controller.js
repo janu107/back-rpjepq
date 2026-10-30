@@ -22,10 +22,12 @@ const estadoCuentaPdf = async (req, res, next) => {
 
 const fallecidos = async (req, res, next) => { try { return successResponse(res, await service.listarFallecidos(), "Fallecimientos registrados"); } catch (e) { next(e); } };
 const corregirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.corregirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento corregido"); } catch (e) { next(e); } };
+const cancelarDeuda = async (req, res, next) => { try { return successResponse(res, await service.cancelarDeudaFallecido(req.params.id, req.body, req.user), "Deuda registrada como cancelada"); } catch (e) { next(e); } };
+const revertirCancelacion = async (req, res, next) => { try { return successResponse(res, await service.revertirCancelacionDeuda(req.params.id, req.body, req.user), "Cancelación revertida"); } catch (e) { next(e); } };
 const revertirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.revertirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento revertido"); } catch (e) { next(e); } };
 
 module.exports = {
-  fallecidos, corregirFallecimiento, revertirFallecimiento,
+  fallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeuda, revertirCancelacion,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, fallecimiento, estadoCuentaPdf
 };

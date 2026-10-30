@@ -12,11 +12,12 @@ const suspender = async (req, res, next) => { try { return successResponse(res, 
 const reactivar = async (req, res, next) => { try { return successResponse(res, await service.reactivar(req.params.id, req.user), "BENEFICIARIO REACTIVADO CORRECTAMENTE"); } catch (e) { next(e); } };
 
 const actualizar = async (req, res, next) => { try { return successResponse(res, await service.actualizar(req.params.id, req.body, req.user), "Beneficiario actualizado correctamente"); } catch (e) { next(e); } };
+const actualizarMontos = async (req, res, next) => { try { return successResponse(res, await service.actualizarMontos(req.params.id, req.body, req.user), "Montos actualizados correctamente"); } catch (e) { next(e); } };
 const actualizarPorcentajes = async (req, res, next) => { try { return successResponse(res, await service.actualizarPorcentajes(req.params.id, req.body, req.user), "Porcentajes actualizados correctamente"); } catch (e) { next(e); } };
 
 const estadoCuenta = async (req, res, next) => { try { return successResponse(res, await service.estadoCuenta(req.params.id), "Estado de cuenta del beneficiario"); } catch (e) { next(e); } };
 
-module.exports = { estadoCuenta, actualizar, actualizarPorcentajes,
+module.exports = { estadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
   buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor,
   getActivos, getSuspendidos, suspender, reactivar
 };

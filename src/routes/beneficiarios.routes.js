@@ -21,6 +21,7 @@ router.get("/:id/estado-cuenta", ADMIN_OP, controller.estadoCuenta);
 // --- Escritura ---
 router.post("/registrar", ADMIN_OP, auditAction("BENEFICIARIOS", "REGISTRAR", (req) => `Registro de beneficiarios jubilado ${req.body?.idJubilado}`), controller.registrarLote);
 router.post("/tutores/registrar", ADMIN_OP, auditAction("BENEFICIARIOS", "TUTOR", "Registro de tutora"), controller.registrarTutor);
+router.put("/jubilado/:id/montos", ADMIN_OP, auditAction("BENEFICIARIOS", "MONTOS", (req) => `Montos de beneficiarios jubilado ${req.params.id}: ${JSON.stringify(req.body?.montos || [])}`), controller.actualizarMontos);
 router.put("/jubilado/:id/porcentajes", ADMIN_OP, auditAction("BENEFICIARIOS", "PORCENTAJES", (req) => `Ajustar porcentajes de beneficiarios jubilado ${req.params.id}`), controller.actualizarPorcentajes);
 router.put("/:id", ADMIN_OP, auditAction("BENEFICIARIOS", "EDITAR", (req) => `Editar beneficiario ${req.params.id}`), controller.actualizar);
 router.post("/:id/suspender", ADMIN_OP, auditAction("BENEFICIARIOS", "SUSPENDER", (req) => `Suspender beneficiario ${req.params.id}`), controller.suspender);

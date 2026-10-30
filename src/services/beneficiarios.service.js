@@ -14,6 +14,46 @@ const { createError } = require("../utils/planillaEstado");
 const PARENTESCOS = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ", "ESPOSO", "CONVIVIENTE", "HERMANO", "HERMANA", "SOBRINO", "SOBRINA",
   "TIO", "TIA", "PRIMO", "PRIMA", "ABUELO", "ABUELA", "NIETO", "NIETA", "AMIGO", "VECINO", "OTRO"];
 const toNum = (v) => Number(v || 0);
+const r2 = (v) => Math.round(toNum(v) * 100) / 100;
+
+// Cobran en la planilla. Lo que se le debe por mes a cada uno es el MONTO que dicta
+// el juez: la esposa hasta el 50% de la pensión y los hijos, entre todos, hasta el
+// otro 50% (si falta uno de los dos, esa mitad no se paga).
+const COBRAN = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ"];
+const esHijo = (p) => ["HIJO", "HIJO_INVALIDEZ"].includes(String(p || "").toUpperCase());
+
+// Pensión del jubilado (la misma base que usa la planilla).
+const pensionDe = async (idJubilado, executor = pool) => {
+  const [[r]] = await executor.query(
+    `SELECT COALESCE(MAX(sal_salario), 0) AS pension FROM RPJ_MNT_SALARIO
+      WHERE sal_id_jubilado = ? AND sal_tipo_manejo = 2 AND sal_tipo_ingreso = 1 AND sal_salario > 0`, [idJubilado]
+  );
+  return toNum(r?.pension);
+};
+
+// Monto de cada beneficiario: el que viene; si solo trae % (pantallas viejas), su % de la pensión.
+const montoDe = (b, pension) => {
+  if (b.monto !== undefined && b.monto !== null && b.monto !== "") return r2(b.monto);
+  return r2((pension * toNum(b.porcentaje)) / 100);
+};
+const pctDe = (monto, pension) => (pension > 0 ? Math.min(r2((monto / pension) * 100), 999.99) : 0);
+
+// Reglas del reparto: esposa <= 50% de la pensión; hijos (todos juntos) <= 50%.
+const validarReparto = (lista, pension) => {
+  if (pension <= 0) throw createError("El jubilado no tiene pensión registrada: no se pueden calcular los montos de sus beneficiarios");
+  const mitad = r2(pension / 2);
+  const esposa = r2(lista.filter((b) => String(b.tipoParentesco).toUpperCase() === "ESPOSA").reduce((a, b) => a + b.monto, 0));
+  const hijos = r2(lista.filter((b) => esHijo(b.tipoParentesco)).reduce((a, b) => a + b.monto, 0));
+  const q = (n) => `Q${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (esposa > mitad) throw createError(`La esposa puede recibir hasta el 50% de la pensión (${q(mitad)}); se indicó ${q(esposa)}`);
+  if (hijos > mitad) throw createError(`Los hijos, entre todos, pueden recibir hasta el 50% de la pensión (${q(mitad)}); se indicó ${q(hijos)}`);
+  lista.forEach((b) => {
+    if (b.monto < 0) throw createError("Los montos no pueden ser negativos");
+    if (COBRAN.includes(String(b.tipoParentesco).toUpperCase()) && b.monto <= 0) {
+      throw createError(`Indique el monto de ${b.apellidos || "cada beneficiario"} (${b.tipoParentesco})`);
+    }
+  });
+};
 
 // Edad cumplida a partir de la fecha de nacimiento.
 const edad = (fechaNac) => {
@@ -54,6 +94,7 @@ const mapBeneficiario = (b) => ({
   dpi: b.dpi,
   fechaNacimiento: b.fechaNacimiento,
   porcentaje: toNum(b.porcentaje),
+  monto: b.monto === null || b.monto === undefined ? null : toNum(b.monto),
   telefono: b.telefono,
   correo: b.correo,
   estado: b.estado,
@@ -78,7 +119,9 @@ const buscarJubilados = async (q) => {
   const [rows] = await pool.execute(
     `SELECT jub_correlativo AS id, jub_id AS idJubilado, jub_dpi AS dpi,
             CONCAT(jub_nombres, ' ', jub_apellidos) AS nombreCompleto,
-            jub_estado AS estado, jub_tipo_pago AS tipoPago, jub_estado_pago AS estadoPago
+            jub_estado AS estado, jub_tipo_pago AS tipoPago, jub_estado_pago AS estadoPago,
+            (SELECT COALESCE(MAX(sal_salario), 0) FROM RPJ_MNT_SALARIO WHERE sal_id_jubilado = jub_correlativo
+                AND sal_tipo_manejo = 2 AND sal_tipo_ingreso = 1 AND sal_salario > 0) AS pension
        FROM RPJ_MNT_JUBILADO
       WHERE jub_estado = 'ACTIVO'
         AND (jub_id LIKE ? OR jub_nombres LIKE ? OR jub_apellidos LIKE ? OR jub_dpi LIKE ?
@@ -87,7 +130,7 @@ const buscarJubilados = async (q) => {
       LIMIT 20`,
     [like, like, like, like, like]
   );
-  return rows;
+  return rows.map((r) => ({ ...r, pension: toNum(r.pension) }));
 };
 
 const getJubilado = async (idJubilado) => {
@@ -109,7 +152,7 @@ const getByJubilado = async (idJubilado) => {
   const [rows] = await pool.execute(
     `SELECT ben_correlativo AS id, ben_id_jubilado AS idJubilado, ben_tipo_parentesco AS tipoParentesco,
             ben_nombres AS nombres, ben_apellidos AS apellidos, ben_dpi AS dpi,
-            ben_fecha_nacimiento AS fechaNacimiento, ben_porcentaje AS porcentaje,
+            ben_fecha_nacimiento AS fechaNacimiento, ben_porcentaje AS porcentaje, ben_monto AS monto,
             ben_telefono AS telefono, ben_correo AS correo, ben_estado AS estado,
             ben_empleador_estatal AS empleadorEstatal, ben_fecha_inicio_empleo AS fechaInicioEmpleo,
             ben_forma_pago AS formaPago, ben_id_banco AS idBanco, bb.ban_descripcion AS bancoNombre,
@@ -149,8 +192,6 @@ const validarBeneficiario = (b, idx) => {
   if (!esDpiValido(b.dpi)) throw createError(`${etiqueta}: el DPI debe tener 13 dígitos`);
   if (!b.fechaNacimiento || Number.isNaN(Date.parse(b.fechaNacimiento))) throw createError(`${etiqueta}: fecha de nacimiento inválida`);
   if (new Date(b.fechaNacimiento) > new Date()) throw createError(`${etiqueta}: la fecha de nacimiento no puede ser futura`);
-  const pct = toNum(b.porcentaje);
-  if (pct <= 0 || pct > 100) throw createError(`${etiqueta}: el porcentaje debe estar entre 0.01 y 100`);
 };
 
 const validarTutora = (t, etiqueta) => {
@@ -178,9 +219,10 @@ const registrarLote = async (payload, currentUser) => {
   // Validación individual
   beneficiarios.forEach(validarBeneficiario);
 
-  // Suma de porcentajes = 100.00 exacto
-  const suma = Math.round(beneficiarios.reduce((s, b) => s + toNum(b.porcentaje), 0) * 100) / 100;
-  if (suma !== 100) throw createError(`La suma de porcentajes debe ser exactamente 100.00 (actual: ${suma.toFixed(2)})`);
+  // Montos (los dicta el juez): esposa hasta 50% de la pensión, hijos entre todos hasta 50%.
+  const pension = await pensionDe(idJubilado);
+  beneficiarios.forEach((b) => { b.monto = montoDe(b, pension); });
+  validarReparto(beneficiarios, pension);
 
   // Máximo 1 ESPOSA
   const esposas = beneficiarios.filter((b) => String(b.tipoParentesco).toUpperCase() === "ESPOSA").length;
@@ -212,11 +254,11 @@ const registrarLote = async (payload, currentUser) => {
       const [res] = await conn.execute(
         `INSERT INTO RPJ_MNT_BENEFICIARIO
            (ben_id_jubilado, ben_tipo_parentesco, ben_nombres, ben_apellidos, ben_dpi,
-            ben_fecha_nacimiento, ben_porcentaje, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion,
+            ben_fecha_nacimiento, ben_porcentaje, ben_monto, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion,
             ben_forma_pago, ben_id_banco, ben_tipo_cuenta, ben_cuenta)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?, ?, ?, ?, ?)`,
         [idJubilado, String(b.tipoParentesco).toUpperCase(), b.nombres || "", b.apellidos, String(b.dpi).trim(),
-         b.fechaNacimiento, toNum(b.porcentaje), b.telefono || null, b.correo || null, usuario,
+         b.fechaNacimiento, pctDe(b.monto, pension), b.monto, b.telefono || null, b.correo || null, usuario,
          ...datosPago(b, `Beneficiario ${b.apellidos}`)]
       );
       const idBen = res.insertId;
@@ -260,8 +302,8 @@ const remove = async (id, currentUser) => {
 };
 
 // ---------------------------------------------------------------------------
-// Edición de un beneficiario ya registrado (datos y su tutora). El porcentaje
-// se cambia aparte (actualizarPorcentajes) porque entre todos deben sumar 100.
+// Edición de un beneficiario ya registrado (datos y su tutora). El monto se
+// cambia aparte (actualizarMontos) porque el reparto se valida entre todos.
 // ---------------------------------------------------------------------------
 const fechaValida = (v) => {
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
@@ -387,6 +429,44 @@ const actualizarPorcentajes = async (idJubilado, payload, currentUser) => {
   return getByJubilado(idJubilado);
 };
 
+// Montos que dicta el juez para todos los beneficiarios de un jubilado.
+// payload: { montos: [{ id, monto }] }. Se puede cambiar aunque ya estén cobrando:
+// los meses ya creados conservan su monto y el nuevo aplica desde la próxima planilla.
+const actualizarMontos = async (idJubilado, payload, currentUser) => {
+  const lista = Array.isArray(payload?.montos) ? payload.montos : [];
+  const [rows] = await pool.execute(
+    `SELECT ben_correlativo AS id, ben_tipo_parentesco AS tipoParentesco, ben_apellidos AS apellidos, ben_monto AS monto
+       FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_estado <> 'INACTIVO'`, [idJubilado]
+  );
+  if (!rows.length) throw createError("El jubilado no tiene beneficiarios vigentes", 404);
+  const porId = new Map(lista.map((x) => [Number(x.id), x]));
+  if (![...porId.keys()].every((id) => rows.some((r) => Number(r.id) === id))) {
+    throw createError("Hay beneficiarios que no pertenecen a este jubilado");
+  }
+  const nuevos = rows.map((r) => ({ ...r, monto: porId.has(Number(r.id)) ? r2(porId.get(Number(r.id)).monto) : r2(r.monto) }));
+  const pension = await pensionDe(idJubilado);
+  validarReparto(nuevos, pension);
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const b of nuevos) {
+      await conn.execute(
+        "UPDATE RPJ_MNT_BENEFICIARIO SET ben_monto = ?, ben_porcentaje = ? WHERE ben_correlativo = ? AND ben_id_jubilado = ?",
+        [b.monto, pctDe(b.monto, pension), b.id, idJubilado]
+      );
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+  logger.info("Montos de beneficiarios actualizados", { idJubilado, montos: nuevos.map((b) => [b.id, b.monto]), usuario: currentUser?.usuario });
+  return getByJubilado(idJubilado);
+};
+
 // ---------------------------------------------------------------------------
 // Estado de cuenta de un beneficiario (viuda o huérfano de un jubilado fallecido).
 //   - Esposa mientras cobra la deuda del fallecido: avance de esa deuda.
@@ -396,7 +476,7 @@ const actualizarPorcentajes = async (idJubilado, payload, currentUser) => {
 const estadoCuenta = async (id) => {
   const [[b]] = await pool.query(
     `SELECT b.ben_correlativo AS id, b.ben_tipo_parentesco AS parentesco, b.ben_nombres AS nombres, b.ben_apellidos AS apellidos,
-            b.ben_dpi AS dpi, b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje, b.ben_estado AS estado,
+            b.ben_dpi AS dpi, b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje, b.ben_monto AS monto, b.ben_estado AS estado,
             b.ben_fecha_activacion AS fechaActivacion, b.ben_fecha_desactivacion AS fechaDesactivacion,
             b.ben_forma_pago AS formaPago, bb.ban_descripcion AS banco, b.ben_cuenta AS cuenta,
             j.jub_correlativo AS idJubilado, j.jub_id AS codigoJubilado, CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS fallecido,
@@ -439,8 +519,14 @@ const estadoCuenta = async (id) => {
         WHERE a.apa_id_jubilado = ? AND a.apa_observaciones LIKE ? AND p.ppl_estado_proceso = 'CERRADA'`,
       [b.idJubilado, `Beneficiario ${id}:%`]
     );
+    const [[can]] = await pool.query(
+      `SELECT cde_fecha AS fecha, cde_documento AS documento, cde_monto AS monto, cde_meses AS meses
+         FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_id_jubilado = ? AND cde_estado = 'VIGENTE'
+        ORDER BY cde_correlativo DESC LIMIT 1`, [b.idJubilado]
+    );
     const cuota = Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
     deudaFallecido = {
+      canceladaFuera: can ? { fecha: can.fecha, documento: can.documento, monto: toNum(can.monto), meses: toNum(can.meses) } : null,
       total: toNum(d.original), pagado: toNum(d.pagado), pendiente: toNum(d.pendiente),
       cobradoPorBeneficiaria: toNum(c.cobrado), mesesPendientes: toNum(d.mesesPendientes), proximoMes: d.proximoMes,
       cuotaMensual: cuota, mesesParaTerminar: cuota > 0 ? Math.ceil(toNum(d.pendiente) / cuota) : null
@@ -466,7 +552,7 @@ const estadoCuenta = async (id) => {
   const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + toNum(x[k]), 0) * 100) / 100;
   const pagosCerrados = pagos.filter((x) => x.estadoPlanilla === "CERRADA");
   const pension = toNum(b.pension);
-  const montoMes = Math.round(pension * toNum(b.porcentaje)) / 100;
+  const montoMes = b.monto !== null && b.monto !== undefined ? r2(b.monto) : Math.round(pension * toNum(b.porcentaje)) / 100;
   let fase;
   if (b.estado === "INACTIVO") fase = "TERMINADO";
   else if (b.estado === "REGISTRADO") fase = "AÚN NO COBRA (el jubilado no está registrado como fallecido)";
@@ -477,7 +563,7 @@ const estadoCuenta = async (id) => {
   return {
     beneficiario: {
       id: b.id, nombre: `${b.nombres || ""} ${b.apellidos}`.trim(), parentesco: b.parentesco, dpi: b.dpi,
-      fechaNacimiento: b.fechaNacimiento, edad: edadHoy, esMenor, porcentaje: toNum(b.porcentaje), estado: b.estado,
+      fechaNacimiento: b.fechaNacimiento, edad: edadHoy, esMenor, porcentaje: toNum(b.porcentaje), monto: montoMes, estado: b.estado,
       fechaActivacion: b.fechaActivacion, fechaDesactivacion: b.fechaDesactivacion,
       pago: esMenor && tut ? { aNombreDe: tut.nombre, formaPago: tut.formaPago, banco: tut.banco, cuenta: tut.cuenta, esTutora: true }
         : { aNombreDe: `${b.nombres || ""} ${b.apellidos}`.trim(), formaPago: b.formaPago, banco: b.banco, cuenta: b.cuenta, esTutora: false }
@@ -529,7 +615,7 @@ const listarPorEstado = async (estado, q) => {
   const [rows] = await pool.query(
     `SELECT b.ben_correlativo AS id, b.ben_id_jubilado AS idJubilado, b.ben_tipo_parentesco AS tipoParentesco,
             b.ben_nombres AS nombres, b.ben_apellidos AS apellidos, b.ben_dpi AS dpi,
-            b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje,
+            b.ben_fecha_nacimiento AS fechaNacimiento, b.ben_porcentaje AS porcentaje, b.ben_monto AS monto,
             b.ben_telefono AS telefono, b.ben_correo AS correo, b.ben_estado AS estado,
             b.ben_empleador_estatal AS empleadorEstatal, b.ben_fecha_inicio_empleo AS fechaInicioEmpleo,
             j.jub_id AS codigoJubilado,
@@ -581,6 +667,6 @@ const reactivar = async (id, currentUser) => {
 };
 
 module.exports = {
-  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, actualizar, actualizarPorcentajes,
+  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
   getActivos, getSuspendidos, suspender, reactivar
 };

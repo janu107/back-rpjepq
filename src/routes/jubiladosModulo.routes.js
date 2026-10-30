@@ -28,6 +28,8 @@ router.get("/:id/historia-completa", LECTURA, controller.historiaCompleta);
 router.get("/:id/estado-cuenta.pdf", LECTURA, controller.estadoCuentaPdf);
 router.put("/:id/fallecimiento", ADMIN_OP, auditAction("JUBILADOS", "CORREGIR_FALLECIMIENTO", (req) => `Corregir fallecimiento jubilado ${req.params.id}`), controller.corregirFallecimiento);
 router.post("/:id/fallecimiento/revertir", authorizeRoles("ADMIN"), auditAction("JUBILADOS", "REVERTIR_FALLECIMIENTO", (req) => `Revertir fallecimiento jubilado ${req.params.id}`), controller.revertirFallecimiento);
+router.post("/:id/deuda/cancelar", ADMIN_OP, auditAction("JUBILADOS", "CANCELAR_DEUDA_FALLECIDO", (req) => `Deuda del fallecido ${req.params.id} pagada fuera del sistema: ${req.body?.documento || ""}`), controller.cancelarDeuda);
+router.post("/:id/deuda/cancelar/revertir", authorizeRoles("ADMIN"), auditAction("JUBILADOS", "REVERTIR_CANCELACION_DEUDA", (req) => `Revertir cancelación de deuda del jubilado ${req.params.id}`), controller.revertirCancelacion);
 router.post("/:id/fallecimiento", ADMIN_OP, auditAction("JUBILADOS", "FALLECIMIENTO", (req) => `Registrar fallecimiento jubilado ${req.params.id}`), controller.fallecimiento);
 
 module.exports = router;
