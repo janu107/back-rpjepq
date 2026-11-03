@@ -8,4 +8,13 @@ const removeDetalle = async (req, res, next) => { try { return successResponse(r
 const getTotal = async (req, res, next) => { try { return successResponse(res, await service.getTotal(req.params.id), "Total aportado obtenido correctamente"); } catch (error) { next(error); } };
 const bulkUpload = async (req, res, next) => { try { return successResponse(res, await service.bulkUpload(req.file?.buffer, req.user), "Carga masiva procesada correctamente", 201); } catch (error) { next(error); } };
 
-module.exports = { listByAportacion, createDetalle, updateDetalle, removeDetalle, getTotal, bulkUpload };
+const plantillaCarga = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.plantillaCarga();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (error) { next(error); }
+};
+
+module.exports = { listByAportacion, createDetalle, updateDetalle, removeDetalle, getTotal, bulkUpload, plantillaCarga };

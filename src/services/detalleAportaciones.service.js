@@ -218,4 +218,45 @@ const bulkUpload = async (buffer, currentUser) => {
   return summary;
 };
 
-module.exports = { listByAportacion, createDetalle, updateDetalle, removeDetalle, getTotal, bulkUpload };
+// Plantilla de la carga masiva. La hoja 1 (la que se lee) va solo con los encabezados,
+// para que nunca se suban ejemplos por error; el ejemplo y las reglas van en la hoja 2.
+const plantillaCarga = async () => {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "RPJEPQ";
+  const ws = wb.addWorksheet("Aportaciones");
+  ws.columns = [{ header: "ID EMPLEADO", width: 16 }, { header: "FECHA", width: 14 }, { header: "MONTO", width: 14 }];
+  const enc = ws.getRow(1);
+  enc.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  enc.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E5F" } }; c.alignment = { horizontal: "center" }; });
+  ws.getColumn(2).numFmt = "dd/mm/yyyy";
+  ws.getColumn(3).numFmt = "#,##0.00";
+
+  const inst = wb.addWorksheet("Instrucciones");
+  inst.getColumn(1).width = 16; inst.getColumn(2).width = 14; inst.getColumn(3).width = 14; inst.getColumn(4).width = 70;
+  const lineas = [
+    ["CARGA MASIVA DE APORTACIONES EPQ"],
+    [],
+    ["Reglas"],
+    ["1. Llene la hoja \"Aportaciones\" (la primera). No cambie los encabezados de la fila 1."],
+    ["2. ID EMPLEADO: el código del empleado EPQ (el mismo de Mantenimiento EPQ › Empleados EPQ)."],
+    ["3. FECHA: la fecha de pago del aporte. Como fecha de Excel, o escrita 31/10/2026 o 2026-10-31."],
+    ["4. MONTO: el valor del aporte, mayor a cero, sin la letra Q (por ejemplo 250.50)."],
+    ["5. Una fila por aporte. Las filas vacías se ignoran."],
+    ["6. Si ya existe un aporte del mismo empleado en la misma fecha, esa fila se omite (no se duplica ni se cambia)."],
+    ["7. Archivo .xlsx de máximo 5 MB. Al terminar el sistema muestra cuántas filas se agregaron, se omitieron y cuáles tuvieron error."],
+    [],
+    ["Ejemplo (así deben verse las filas en la hoja \"Aportaciones\")"]
+  ];
+  lineas.forEach((l) => inst.addRow(l));
+  inst.getRow(1).font = { bold: true, size: 13 };
+  inst.getRow(3).font = { bold: true };
+  inst.getRow(12).font = { bold: true };
+  const ej = inst.addRow(["ID EMPLEADO", "FECHA", "MONTO"]);
+  ej.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  [1, 2, 3].forEach((i) => { ej.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E5F" } }; });
+  [[1234, new Date(Date.UTC(2026, 9, 31)), 250.5], [1234, new Date(Date.UTC(2026, 10, 30)), 250.5], [5678, new Date(Date.UTC(2026, 9, 31)), 310]]
+    .forEach((r) => { const x = inst.addRow(r); x.getCell(2).numFmt = "dd/mm/yyyy"; x.getCell(3).numFmt = "#,##0.00"; });
+  return { buffer: await wb.xlsx.writeBuffer(), filename: "plantilla_carga_aportaciones.xlsx" };
+};
+
+module.exports = { listByAportacion, createDetalle, updateDetalle, removeDetalle, getTotal, bulkUpload, plantillaCarga };

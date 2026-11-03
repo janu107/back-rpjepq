@@ -25,6 +25,8 @@ router.get("/dashboard", authorizeRoles("ADMIN", "OPERADOR"), async (req, res, n
     return successResponse(res, data, "Dashboard de aportaciones");
   } catch (error) { next(error); }
 });
+// Plantilla de la carga masiva (antes de "/:id").
+router.get("/carga-masiva/plantilla", authorizeRoles("ADMIN", "OPERADOR"), detalleController.plantillaCarga);
 router.get("/:id", authorizeRoles("ADMIN", "OPERADOR"), aportacionesController.getById);
 router.post("/", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "CREAR", "Creacion de aportacion"), aportacionesController.create);
 router.put("/:id", authorizeRoles("ADMIN", "OPERADOR"), auditAction("APORTACIONES", "EDITAR", (req) => `Edicion aportacion ${req.params.id}`), aportacionesController.update);
