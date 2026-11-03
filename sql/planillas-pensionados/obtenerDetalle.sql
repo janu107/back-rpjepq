@@ -36,7 +36,7 @@ LEFT JOIN  RPJ_MNT_TUTOR pagaTutora
        ON pagaTutora.tut_correlativo = (
             SELECT t2.tut_correlativo FROM RPJ_MNT_TUTOR t2
              WHERE t2.tut_id_beneficiario = bn.ben_correlativo AND t2.tut_estado = 'VIGENTE'
-               AND bn.ben_tipo_parentesco <> 'ESPOSA'
+               AND bn.ben_tipo_parentesco NOT IN ('ESPOSA', 'ESPOSO')
                AND TIMESTAMPDIFF(YEAR, bn.ben_fecha_nacimiento, pp.ppl_fecha_inicio) < 18
              ORDER BY t2.tut_correlativo DESC LIMIT 1)
 LEFT JOIN  RPJ_CAT_BANCOS bt             ON bt.ban_id = pagaTutora.tut_id_banco

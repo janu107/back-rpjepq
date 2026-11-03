@@ -1031,7 +1031,7 @@ const filasConFallecidos = (filas) => {
   const propios = filas.filter((f) => !Number(f.es_beneficiario));
   const ben = filas.filter((f) => Number(f.es_beneficiario));
   if (!ben.length) return filas;
-  const orden = { ESPOSA: 0, HIJO_INVALIDEZ: 1, HIJO: 2 };
+  const orden = { ESPOSA: 0, ESPOSO: 0, HIJO_INVALIDEZ: 1, HIJO: 2 };
   ben.sort((a, b) => String(a.nombre_fallecido).localeCompare(String(b.nombre_fallecido))
     || (orden[a.parentesco] ?? 9) - (orden[b.parentesco] ?? 9)
     || String(a.nombre_beneficiario).localeCompare(String(b.nombre_beneficiario)));

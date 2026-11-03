@@ -60,7 +60,7 @@ SELECT * FROM (
   LEFT JOIN RPJ_MNT_TUTOR t ON t.tut_correlativo = (
     SELECT t2.tut_correlativo FROM RPJ_MNT_TUTOR t2
      WHERE t2.tut_id_beneficiario = b.ben_correlativo AND t2.tut_estado = 'VIGENTE'
-       AND b.ben_tipo_parentesco <> 'ESPOSA'
+       AND b.ben_tipo_parentesco NOT IN ('ESPOSA', 'ESPOSO')
        AND TIMESTAMPDIFF(YEAR, b.ben_fecha_nacimiento, pla.ppl_fecha_inicio) < 18
      ORDER BY t2.tut_correlativo DESC LIMIT 1)
   LEFT JOIN RPJ_CAT_BANCOS bt ON bt.ban_id = t.tut_id_banco

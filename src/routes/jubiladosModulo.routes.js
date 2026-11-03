@@ -18,6 +18,7 @@ const LECTURA = authorizeRoles("ADMIN", "OPERADOR", "CONSULTA"); // consultas: C
 router.get("/buscar", LECTURA, controller.buscar);
 router.get("/fallecidos", LECTURA, controller.fallecidos);
 router.get("/no-amparistas", LECTURA, controller.noAmparistas);
+router.post("/fallecido-en-servicio", ADMIN_OP, auditAction("JUBILADOS", "FALLECIDO_EN_SERVICIO", (req) => `Empleado EPQ ${req.body?.idAportacion} fallecido en servicio (código ${req.body?.codigo})`), controller.fallecidoEnServicio);
 router.get("/:id/deuda-total", LECTURA, controller.deudaTotal);
 router.get("/:id/beneficiarios-registrados", LECTURA, controller.beneficiariosRegistrados);
 router.get("/:id/beneficiarios-activos", LECTURA, controller.beneficiariosActivos);

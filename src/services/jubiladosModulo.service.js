@@ -364,6 +364,7 @@ const listarFallecidos = async () => {
   const [rows] = await pool.query(
     `SELECT j.jub_correlativo AS id, j.jub_id AS codigo, CONCAT(j.jub_nombres, ' ', j.jub_apellidos) AS nombre,
             j.jub_fecha_fallecimiento AS fechaFallecimiento, j.jub_no_defuncion AS noDefuncion,
+            COALESCE(j.jub_fallecido_en_servicio, 0) AS enServicio,
             (SELECT COUNT(*) FROM RPJ_MNT_BENEFICIARIO b WHERE b.ben_id_jubilado = j.jub_correlativo) AS beneficiarios,
             (SELECT GROUP_CONCAT(DISTINCT p.ppl_numero ORDER BY p.ppl_numero SEPARATOR ', ')
                FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
@@ -389,7 +390,7 @@ const listarFallecidos = async () => {
   return rows.map((r) => {
     const c = cans.find((x) => Number(x.idJubilado) === Number(r.id));
     return {
-      ...r, beneficiarios: toNum(r.beneficiarios), editable: !r.planillasCerradas,
+      ...r, beneficiarios: toNum(r.beneficiarios), editable: !r.planillasCerradas, enServicio: Number(r.enServicio) === 1,
       deudaPendiente: toNum(r.deudaPendiente), mesesPendientes: toNum(r.mesesPendientes),
       cancelacion: c ? { ...c, monto: toNum(c.monto), meses: toNum(c.meses) } : null
     };
@@ -432,6 +433,7 @@ const corregirFallecimiento = async (id, body, currentUser) => {
 const revertirFallecimiento = async (id, body, currentUser) => {
   const f = await estadoFallecido(id);
   if (f.cancelacion) throw createError("Primero revierta la cancelación de su deuda (registrada fuera del sistema)", 409);
+  if (f.enServicio) throw createError("Falleció en servicio (nunca fue jubilado): no se revierte; corrija la fecha o el certificado con Corregir", 409);
   if (f.planillasGeneradas) {
     throw createError(`Primero reverse la planilla ${f.planillasGeneradas}: ya está GENERADA con sus beneficiarios`, 409);
   }
@@ -455,6 +457,82 @@ const revertirFallecimiento = async (id, body, currentUser) => {
   }
   logger.info("Fallecimiento revertido", { idJubilado: id, motivo: body?.motivo, usuario: currentUser?.usuario });
   return { id: Number(id), estadoPago: "ACTIVO" };
+};
+
+// ---------------------------------------------------------------------------
+// Empleado EPQ que fallece EN SERVICIO (estaba aportando, nunca fue jubilado).
+// Se registra como jubilado FALLECIDO con jub_fallecido_en_servicio = 1 para poder
+// asignarle beneficiarios. La pensión de referencia es la base del tope 50% / 50%.
+// No tiene deuda: su cónyuge entra directo a VIUDEZ y los hijos a ORFANDAD, desde
+// la planilla del mes en que se registra. El empleado EPQ queda FALLECIDO.
+// ---------------------------------------------------------------------------
+const registrarFallecidoEnServicio = async (body, currentUser) => {
+  const idAportacion = Number(body?.idAportacion);
+  const codigo = Number(body?.codigo);
+  const fecha = String(body?.fechaFallecimiento || "").slice(0, 10);
+  const noDef = String(body?.noDefuncion || "").trim();
+  const pension = Math.round(toNum(body?.pensionReferencia) * 100) / 100;
+  const tipo = Number(body?.tipoJubilacion || 3);
+  if (!idAportacion) throw createError("Seleccione el empleado EPQ que falleció");
+  if (!Number.isInteger(codigo) || codigo <= 0) throw createError("Indique el código con el que quedará registrado");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("La fecha de fallecimiento es obligatoria");
+  if (fecha > new Date().toISOString().slice(0, 10)) throw createError("La fecha de fallecimiento no puede ser futura");
+  if (!noDef) throw createError("El No. de certificado de defunción es obligatorio");
+  if (!(pension > 0)) throw createError("Indique la pensión de referencia (base para los montos de los beneficiarios)");
+  const usuario = currentUser?.usuario || "sistema";
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[apo]] = await conn.query(
+      `SELECT apo_correlativo AS id, apo_id AS codigo, apo_nombre AS nombre, apo_apellido AS apellido, apo_dpi AS dpi,
+              apo_fecha_nacimiento AS fechaNacimiento, apo_sexo AS sexo, apo_ubicacion AS ubicacion, apo_estado AS estado
+         FROM RPJ_MNT_APORTACION_EPQ WHERE apo_correlativo = ? FOR UPDATE`, [idAportacion]
+    );
+    if (!apo) throw createError("Empleado EPQ no encontrado", 404);
+    if (String(apo.estado).toUpperCase() === "FALLECIDO") throw createError("Este empleado EPQ ya está registrado como fallecido", 409);
+    const [dupCod] = await conn.query("SELECT jub_correlativo FROM RPJ_MNT_JUBILADO WHERE jub_id = ? LIMIT 1", [codigo]);
+    if (dupCod.length) throw createError(`Ya existe un jubilado con el código ${codigo}: use otro código`, 409);
+    const [dupDpi] = await conn.query("SELECT jub_id FROM RPJ_MNT_JUBILADO WHERE jub_dpi = ? LIMIT 1", [apo.dpi]);
+    if (dupDpi.length) throw createError(`El DPI ${apo.dpi} ya está registrado como jubilado (código ${dupDpi[0].jub_id})`, 409);
+    const [tj] = await conn.query("SELECT tju_id FROM RPJ_CAT_TIPO_JUBILACION WHERE tju_id = ?", [tipo]);
+    if (!tj.length) throw createError("Tipo de jubilación no válido");
+    // Cobran desde la planilla siguiente a la última de jubilados ya CERRADA (sin atrasados).
+    const [[ult]] = await conn.query(
+      "SELECT MAX(ppl_numero) AS n FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso = 'CERRADA'"
+    );
+    const hoy = new Date();
+    const mesActual = hoy.getFullYear() * 100 + hoy.getMonth() + 1;
+    const sig = ult?.n ? (Number(ult.n) % 100 === 12 ? Number(ult.n) + 89 : Number(ult.n) + 1) : mesActual;
+    const inicio = Math.max(sig, Number(fecha.slice(0, 4)) * 100 + Number(fecha.slice(5, 7)));
+
+    const [res] = await conn.execute(
+      `INSERT INTO RPJ_MNT_JUBILADO
+         (jub_tipo_manejo, jub_id, jub_nombres, jub_apellidos, jub_fecha_nacimiento, jub_dpi, jub_direccion, jub_profesion_oficio,
+          jub_estado_civil, jub_estado, jub_fecha_jubilacion, jub_tipo_jubilacion, jub_usuario_creacion, jub_sexo, jub_tipo_pago,
+          jub_estado_pago, jub_fecha_fallecimiento, jub_no_defuncion, jub_fallecido_en_servicio, jub_periodo_inicio_beneficios)
+       VALUES (2, ?, ?, ?, ?, ?, ?, 'EMPLEADO EPQ (FALLECIÓ EN SERVICIO)', 'N/A', 'ACTIVO', ?, ?, ?, ?, 'NORMAL', 'FALLECIDO', ?, ?, 1, ?)`,
+      [codigo, apo.nombre, apo.apellido, apo.fechaNacimiento, apo.dpi, apo.ubicacion || "N/A", fecha, tipo, usuario,
+       apo.sexo || null, fecha, noDef.slice(0, 50), inicio]
+    );
+    await conn.execute(
+      "INSERT INTO RPJ_MNT_SALARIO (sal_tipo_manejo, sal_id_jubilado, sal_tipo_ingreso, sal_salario, sal_usuario_creacion) VALUES (2, ?, 1, ?, ?)",
+      [res.insertId, pension, usuario]
+    );
+    await conn.execute(
+      `UPDATE RPJ_MNT_APORTACION_EPQ
+          SET apo_estado = 'FALLECIDO', apo_fecha_fin_aportacion = ?, apo_motivo_retiro = 'FALLECIMIENTO EN SERVICIO'
+        WHERE apo_correlativo = ?`, [fecha, idAportacion]
+    );
+    await conn.commit();
+    logger.info("Fallecido en servicio registrado", { idAportacion, codigo, idJubilado: res.insertId, usuario });
+    return { idJubilado: res.insertId, codigo, nombre: `${apo.nombre} ${apo.apellido}`, inicioBeneficios: inicio };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -706,6 +784,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
 
 module.exports = {
   listarFallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeudaFallecido, revertirCancelacionDeuda,
+  registrarFallecidoEnServicio,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, registrarFallecimiento,
   generarEstadoCuentaPdf

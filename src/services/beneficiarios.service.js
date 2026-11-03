@@ -9,7 +9,7 @@ const { createError } = require("../utils/planillaEstado");
 // SQL en línea (el módulo es nuevo y autocontenido).
 // ============================================================================
 
-// ESPOSA, HIJO e HIJO_INVALIDEZ cobran en la planilla; los demás por ahora solo
+// El cónyuge (ESPOSA o ESPOSO), HIJO e HIJO_INVALIDEZ cobran en la planilla; los demás solo
 // se registran (todavía sin regla de pago).
 const PARENTESCOS = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ", "ESPOSO", "CONVIVIENTE", "HERMANO", "HERMANA", "SOBRINO", "SOBRINA",
   "TIO", "TIA", "PRIMO", "PRIMA", "ABUELO", "ABUELA", "NIETO", "NIETA", "AMIGO", "VECINO", "OTRO"];
@@ -19,7 +19,9 @@ const r2 = (v) => Math.round(toNum(v) * 100) / 100;
 // Cobran en la planilla. Lo que se le debe por mes a cada uno es el MONTO que dicta
 // el juez: la esposa hasta el 50% de la pensión y los hijos, entre todos, hasta el
 // otro 50% (si falta uno de los dos, esa mitad no se paga).
-const COBRAN = ["ESPOSA", "HIJO", "HIJO_INVALIDEZ"];
+const COBRAN = ["ESPOSA", "ESPOSO", "HIJO", "HIJO_INVALIDEZ"];
+// Viuda o viudo: cobran igual (viudez). Solo uno por fallecido.
+const esConyuge = (p) => ["ESPOSA", "ESPOSO"].includes(String(p || "").toUpperCase());
 const esHijo = (p) => ["HIJO", "HIJO_INVALIDEZ"].includes(String(p || "").toUpperCase());
 
 // Pensión del jubilado (la misma base que usa la planilla).
@@ -42,10 +44,10 @@ const pctDe = (monto, pension) => (pension > 0 ? Math.min(r2((monto / pension) *
 const validarReparto = (lista, pension) => {
   if (pension <= 0) throw createError("El jubilado no tiene pensión registrada: no se pueden calcular los montos de sus beneficiarios");
   const mitad = r2(pension / 2);
-  const esposa = r2(lista.filter((b) => String(b.tipoParentesco).toUpperCase() === "ESPOSA").reduce((a, b) => a + b.monto, 0));
+  const esposa = r2(lista.filter((b) => esConyuge(b.tipoParentesco)).reduce((a, b) => a + b.monto, 0));
   const hijos = r2(lista.filter((b) => esHijo(b.tipoParentesco)).reduce((a, b) => a + b.monto, 0));
   const q = (n) => `Q${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (esposa > mitad) throw createError(`La esposa puede recibir hasta el 50% de la pensión (${q(mitad)}); se indicó ${q(esposa)}`);
+  if (esposa > mitad) throw createError(`El cónyuge (viuda o viudo) puede recibir hasta el 50% de la pensión (${q(mitad)}); se indicó ${q(esposa)}`);
   if (hijos > mitad) throw createError(`Los hijos, entre todos, pueden recibir hasta el 50% de la pensión (${q(mitad)}); se indicó ${q(hijos)}`);
   lista.forEach((b) => {
     if (b.monto < 0) throw createError("Los montos no pueden ser negativos");
@@ -120,6 +122,7 @@ const buscarJubilados = async (q) => {
     `SELECT jub_correlativo AS id, jub_id AS idJubilado, jub_dpi AS dpi,
             CONCAT(jub_nombres, ' ', jub_apellidos) AS nombreCompleto,
             jub_estado AS estado, jub_tipo_pago AS tipoPago, jub_estado_pago AS estadoPago,
+            COALESCE(jub_fallecido_en_servicio, 0) AS enServicio,
             (SELECT COALESCE(MAX(sal_salario), 0) FROM RPJ_MNT_SALARIO WHERE sal_id_jubilado = jub_correlativo
                 AND sal_tipo_manejo = 2 AND sal_tipo_ingreso = 1 AND sal_salario > 0) AS pension
        FROM RPJ_MNT_JUBILADO
@@ -130,7 +133,7 @@ const buscarJubilados = async (q) => {
       LIMIT 20`,
     [like, like, like, like, like]
   );
-  return rows.map((r) => ({ ...r, pension: toNum(r.pension) }));
+  return rows.map((r) => ({ ...r, pension: toNum(r.pension), enServicio: Number(r.enServicio) === 1 }));
 };
 
 const getJubilado = async (idJubilado) => {
@@ -195,9 +198,9 @@ const validarBeneficiario = (b, idx) => {
 };
 
 const validarTutora = (t, etiqueta) => {
-  if (!t || typeof t !== "object") throw createError(`${etiqueta}: es menor de edad y requiere tutora`);
-  if (!t.apellidos || String(t.apellidos).trim() === "") throw createError(`${etiqueta} (tutora): los apellidos son obligatorios`);
-  if (!esDpiValido(t.dpi)) throw createError(`${etiqueta} (tutora): el DPI debe tener 13 dígitos`);
+  if (!t || typeof t !== "object") throw createError(`${etiqueta}: es menor de edad y requiere un tutor (mayor de edad)`);
+  if (!t.apellidos || String(t.apellidos).trim() === "") throw createError(`${etiqueta} (tutor): los apellidos son obligatorios`);
+  if (!esDpiValido(t.dpi)) throw createError(`${etiqueta} (tutor): el DPI debe tener 13 dígitos`);
 };
 
 // ---------------------------------------------------------------------------
@@ -214,7 +217,10 @@ const registrarLote = async (payload, currentUser) => {
   if (!idJubilado) throw createError("Debe indicar el jubilado (idJubilado)");
   if (!beneficiarios.length) throw createError("Debe registrar al menos un beneficiario");
 
-  await getJubilado(idJubilado); // valida que exista
+  const jub = await getJubilado(idJubilado); // valida que exista
+  // Si ya está registrado como fallecido (por ejemplo, falleció en servicio), sus
+  // beneficiarios quedan ACTIVOS de una vez y entran a la próxima planilla.
+  const yaFallecido = jub.estadoPago === "FALLECIDO";
 
   // Validación individual
   beneficiarios.forEach(validarBeneficiario);
@@ -224,9 +230,9 @@ const registrarLote = async (payload, currentUser) => {
   beneficiarios.forEach((b) => { b.monto = montoDe(b, pension); });
   validarReparto(beneficiarios, pension);
 
-  // Máximo 1 ESPOSA
-  const esposas = beneficiarios.filter((b) => String(b.tipoParentesco).toUpperCase() === "ESPOSA").length;
-  if (esposas > 1) throw createError("Solo se permite un beneficiario con parentesco ESPOSA");
+  // Máximo 1 cónyuge (ESPOSA o ESPOSO)
+  const conyuges = beneficiarios.filter((b) => esConyuge(b.tipoParentesco)).length;
+  if (conyuges > 1) throw createError("Solo se permite un cónyuge (ESPOSA o ESPOSO)");
 
   // DPI único dentro del lote
   const dpis = beneficiarios.map((b) => String(b.dpi).trim());
@@ -256,9 +262,10 @@ const registrarLote = async (payload, currentUser) => {
            (ben_id_jubilado, ben_tipo_parentesco, ben_nombres, ben_apellidos, ben_dpi,
             ben_fecha_nacimiento, ben_porcentaje, ben_monto, ben_telefono, ben_correo, ben_estado, ben_fecha_registro, ben_usuario_creacion,
             ben_forma_pago, ben_id_banco, ben_tipo_cuenta, ben_cuenta)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRADO', CURDATE(), ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)`,
         [idJubilado, String(b.tipoParentesco).toUpperCase(), b.nombres || "", b.apellidos, String(b.dpi).trim(),
-         b.fechaNacimiento, pctDe(b.monto, pension), b.monto, b.telefono || null, b.correo || null, usuario,
+         b.fechaNacimiento, pctDe(b.monto, pension), b.monto, b.telefono || null, b.correo || null,
+         yaFallecido && COBRAN.includes(String(b.tipoParentesco).toUpperCase()) ? "ACTIVO" : "REGISTRADO", usuario,
          ...datosPago(b, `Beneficiario ${b.apellidos}`)]
       );
       const idBen = res.insertId;
@@ -272,9 +279,16 @@ const registrarLote = async (payload, currentUser) => {
            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURDATE()), ?, ?, ?, ?, ?)`,
           [idBen, t.nombres || "", t.apellidos, String(t.dpi).trim(), t.parentesco || null, t.telefono || null,
            /^\d{4}-\d{2}-\d{2}/.test(String(t.fechaInicio || "")) ? String(t.fechaInicio).slice(0, 10) : null, usuario,
-           ...datosPago(t, `Tutora de ${b.apellidos}`)]
+           ...datosPago(t, `Tutor de ${b.apellidos}`)]
         );
       }
+    }
+    if (yaFallecido) {
+      await conn.execute(
+        `UPDATE RPJ_MNT_BENEFICIARIO b JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = b.ben_id_jubilado
+            SET b.ben_fecha_activacion = COALESCE(j.jub_fecha_fallecimiento, CURDATE())
+          WHERE b.ben_id_jubilado = ? AND b.ben_estado = 'ACTIVO' AND b.ben_fecha_activacion IS NULL`, [idJubilado]
+      );
     }
     await conn.commit();
   } catch (e) {
@@ -328,12 +342,12 @@ const actualizar = async (id, payload, currentUser) => {
     [actual.ben_id_jubilado, dpi, id]
   );
   if (dup.length) throw createError(`El DPI ${dpi} ya está registrado en otro beneficiario de este jubilado`);
-  if (parentesco === "ESPOSA") {
+  if (esConyuge(parentesco)) {
     const [esp] = await pool.execute(
-      "SELECT ben_correlativo FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_tipo_parentesco = 'ESPOSA' AND ben_correlativo <> ?",
+      "SELECT ben_correlativo FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_tipo_parentesco IN ('ESPOSA','ESPOSO') AND ben_correlativo <> ?",
       [actual.ben_id_jubilado, id]
     );
-    if (esp.length) throw createError("Este jubilado ya tiene un beneficiario con parentesco ESPOSA");
+    if (esp.length) throw createError("Este jubilado ya tiene registrado a su cónyuge (ESPOSA o ESPOSO)");
   }
   const menor = edad(b.fechaNacimiento) < 18;
   const [tutVig] = await pool.execute(
@@ -344,7 +358,7 @@ const actualizar = async (id, payload, currentUser) => {
   if (t) validarTutora(t, "El beneficiario");
 
   const pagoBen = datosPago(payload, "El beneficiario");
-  const pagoTut = t ? datosPago(t, "La tutora") : null;
+  const pagoTut = t ? datosPago(t, "El tutor") : null;
   const usuario = currentUser?.usuario || "sistema";
   const conn = await pool.getConnection();
   try {
@@ -501,11 +515,11 @@ const estadoCuenta = async (id) => {
   );
   const pctPlanilla = toNum(pla?.pct || 50);
   const edadHoy = b.fechaNacimiento ? edad(b.fechaNacimiento) : null;
-  const esMenor = b.parentesco !== "ESPOSA" && edadHoy !== null && edadHoy < 18;
+  const esMenor = !esConyuge(b.parentesco) && edadHoy !== null && edadHoy < 18;
 
   // Deuda del fallecido (la cobra la esposa).
   let deudaFallecido = null;
-  if (b.parentesco === "ESPOSA") {
+  if (esConyuge(b.parentesco)) {
     const [[d]] = await pool.query(
       `SELECT COALESCE(SUM(deu_monto_original), 0) AS original, COALESCE(SUM(deu_monto_pagado), 0) AS pagado,
               COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente, SUM(deu_monto_pendiente > 0) AS mesesPendientes,
@@ -556,7 +570,7 @@ const estadoCuenta = async (id) => {
   let fase;
   if (b.estado === "INACTIVO") fase = "TERMINADO";
   else if (b.estado === "REGISTRADO") fase = "AÚN NO COBRA (el jubilado no está registrado como fallecido)";
-  else if (b.parentesco === "ESPOSA") fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO" : "VIUDEZ";
+  else if (esConyuge(b.parentesco)) fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO" : "VIUDEZ";
   else if (b.parentesco === "HIJO" && !esMenor) fase = "MAYOR DE EDAD: SE LE LIQUIDA LO QUE SE LE DEBE";
   else fase = "ORFANDAD";
 

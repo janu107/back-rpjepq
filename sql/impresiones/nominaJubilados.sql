@@ -79,7 +79,7 @@ SELECT
   j.jub_id,
   CONCAT(TRIM(CONCAT(COALESCE(b.ben_nombres, ''), ' ', b.ben_apellidos)),
          IF(tut.tut_correlativo IS NOT NULL AND TIMESTAMPDIFF(YEAR, b.ben_fecha_nacimiento, pla.ppl_fecha_inicio) < 18,
-            CONCAT(' (TUTORA: ', TRIM(CONCAT(COALESCE(tut.tut_nombres, ''), ' ', tut.tut_apellidos)), ')'), '')),
+            CONCAT(' (TUTOR: ', TRIM(CONCAT(COALESCE(tut.tut_nombres, ''), ' ', tut.tut_apellidos)), ')'), '')),
   CASE i.nin_puesto
     WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'VIUDEZ (DEUDA)'
     WHEN 'LIQUIDACION ORFANDAD' THEN 'ORFANDAD (LIQ.)'
