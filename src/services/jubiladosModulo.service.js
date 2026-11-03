@@ -252,7 +252,7 @@ const historiaSinCorte = async (id) => {
             MAX(x.deuda_pagada) AS deudaPagada, MAX(x.deuda_pendiente) AS deudaPendiente,
             MAX(x.deuda_estado) AS deudaEstado, MAX(x.deuda_planilla) AS deudaPlanilla,
             SUM(x.descuentos) AS descuentos, MAX(x.detalle_desc) AS detalleDescuentos,
-            MAX(x.en_proceso) AS enProceso, MAX(x.pagado_con) AS pagadoCon, MAX(x.cancelada_doc) AS canceladaDoc
+            MAX(x.en_proceso) AS enProceso, MAX(x.pagado_con) AS pagadoCon, MAX(x.cancelada_doc) AS canceladaDoc, MAX(x.deu_obs) AS deuObs
        FROM (
          SELECT p.ppl_numero AS periodo, i.nin_valor_teorico AS pension, i.nin_porcentaje_aplicado AS porcentaje,
                 i.nin_valor - COALESCE((SELECT SUM(dd.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO dd
@@ -265,7 +265,7 @@ const historiaSinCorte = async (id) => {
                    FROM RPJ_PRC_NOMINA_DESCUENTO dd LEFT JOIN RPJ_CAT_TIPO_DESCUENTO td ON td.tde_id = dd.nde_tipo_descuento
                   WHERE dd.nde_id_planilla = i.nin_id_planilla AND dd.nde_id_jubilado = i.nin_id_jubilado) AS detalle_desc,
                 IF(p.ppl_estado_proceso = 'GENERADA', 1, 0) AS en_proceso,
-                NULL AS pagado_con, NULL AS cancelada_doc
+                NULL AS pagado_con, NULL AS cancelada_doc, NULL AS deu_obs
            FROM RPJ_PRC_NOMINA_INGRESO i
            INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
           WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
@@ -280,7 +280,8 @@ const historiaSinCorte = async (id) => {
                   WHERE a.apa_id_deuda = d.deu_correlativo) AS pagado_con,
                 (SELECT MAX(c.cde_documento) FROM RPJ_PRC_CANCELACION_DEUDA_DET cd
                    JOIN RPJ_PRC_CANCELACION_DEUDA c ON c.cde_correlativo = cd.cdd_id_cancelacion AND c.cde_estado = 'VIGENTE'
-                  WHERE cd.cdd_id_deuda = d.deu_correlativo) AS cancelada_doc
+                  WHERE cd.cdd_id_deuda = d.deu_correlativo) AS cancelada_doc,
+                d.deu_observaciones AS deu_obs
            FROM RPJ_PRC_DEUDA_JUBILADO d
           WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL
        ) x
@@ -297,6 +298,9 @@ const historiaSinCorte = async (id) => {
     const sumaGrupos = Object.values(grupos).reduce((a, b) => a + b, 0);
     const resto = Math.round((fila.descuentos - sumaGrupos) * 100) / 100;
     if (resto > 0) grupos.otros = Math.round((grupos.otros + resto) * 100) / 100;
+    // Mes del fallecimiento pagado proporcional: se indica cuántos días.
+    const prop = String(r.deuObs || "").match(/Proporcional por fallecimiento \((\d+)\/30/);
+    if (prop) fila.tipoPago = `${fila.tipoPago} · ${prop[1]} días`;
     // Meses de la deuda que se pagaron fuera del sistema (cancelación registrada).
     if (r.canceladaDoc) return { ...fila, desglose: grupos, estado: "CANCELADA", canceladaFuera: r.canceladaDoc };
     return { ...fila, desglose: grupos };
@@ -380,6 +384,132 @@ const historiaMes = (r) => {
     };
 };
 
+// ---------------------------------------------------------------------------
+// Ajuste de la deuda por fallecimiento. El mes del fallecimiento se paga
+// proporcional a los días vividos (mes de 30 días: pensión y descuentos × días/30)
+// y los meses posteriores que solo eran deuda (sin planilla pagada con su código,
+// sin abonos) se borran. Se guarda lo cambiado para poder restaurarlo.
+// ---------------------------------------------------------------------------
+const r2 = (v) => Math.round(Number(v || 0) * 100) / 100;
+
+const revertirAjusteFallecimiento = async (conn, idJubilado) => {
+  const [[aj]] = await conn.query(
+    "SELECT afa_correlativo AS id, afa_detalle AS detalle FROM RPJ_PRC_AJUSTE_FALLECIMIENTO WHERE afa_id_jubilado = ? AND afa_estado = 'VIGENTE' ORDER BY afa_correlativo DESC LIMIT 1 FOR UPDATE",
+    [idJubilado]
+  );
+  if (!aj) return false;
+  const d = JSON.parse(aj.detalle);
+  if (d.prorrateo) {
+    const p = d.prorrateo;
+    await conn.execute(
+      "UPDATE RPJ_PRC_NOMINA_INGRESO SET nin_valor = ?, nin_valor_teorico = ?, nin_pago_corriente = ?, nin_dias_trabajados = ? WHERE nin_correlativo = ?",
+      [p.ingreso.valor, p.ingreso.teorico, p.ingreso.pagoCorriente, p.ingreso.dias, p.ingreso.id]
+    );
+    for (const x of p.descuentos) await conn.execute("UPDATE RPJ_PRC_NOMINA_DESCUENTO SET nde_valor = ? WHERE nde_correlativo = ?", [x.valor, x.id]);
+    await conn.execute(
+      `UPDATE RPJ_PRC_DEUDA_JUBILADO SET deu_monto_original = ?, deu_monto_pendiente = GREATEST(? - deu_monto_pagado, 0), deu_observaciones = ?
+        WHERE deu_correlativo = ?`, [p.deuda.original, p.deuda.original, p.deuda.obs, p.deuda.id]
+    );
+    await conn.execute(
+      `UPDATE RPJ_PRC_DEUDA_JUBILADO SET deu_estado = CASE WHEN deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
+        WHERE deu_correlativo = ?`, [p.deuda.id]
+    );
+  }
+  for (const fila of d.borrados || []) {
+    const cols = Object.keys(fila);
+    await conn.query(`INSERT INTO RPJ_PRC_DEUDA_JUBILADO (${cols.join(", ")}) VALUES (?)`, [cols.map((c) => fila[c])]);
+  }
+  await conn.execute("UPDATE RPJ_PRC_AJUSTE_FALLECIMIENTO SET afa_estado = 'REVERTIDO', afa_fecha_reversion = NOW() WHERE afa_correlativo = ?", [aj.id]);
+  return true;
+};
+
+const aplicarAjusteFallecimiento = async (conn, idJubilado, fecha, usuario) => {
+  const [y, mo, dia] = String(fecha).slice(0, 10).split("-").map(Number);
+  const mes = y * 100 + mo;
+  const dias = Math.min(dia, 30);
+  const detalle = { mes, dias, prorrateo: null, borrados: [], avisos: [] };
+
+  // 1) Mes del fallecimiento proporcional (si no vivió el mes completo).
+  if (dias < 30) {
+    let m = null;
+    try { m = await mesHistoria(idJubilado, mes, conn); } catch { m = null; }
+    if (m && m.editable) {
+      const [[ing]] = await conn.query(
+        "SELECT nin_correlativo AS id, nin_valor AS valor, nin_valor_teorico AS teorico, nin_pago_corriente AS pagoCorriente, nin_dias_trabajados AS dias FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_correlativo = ?",
+        [m.ingreso.id]
+      );
+      const [[deu]] = await conn.query("SELECT deu_monto_original AS original, deu_observaciones AS obs FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_correlativo = ?", [m.deuda.id]);
+      detalle.prorrateo = {
+        ingreso: { id: ing.id, valor: r2(ing.valor), teorico: r2(ing.teorico), pagoCorriente: r2(ing.pagoCorriente), dias: ing.dias },
+        descuentos: m.descuentos.map((x) => ({ id: x.id, valor: r2(x.valor) })),
+        deuda: { id: m.deuda.id, original: r2(deu.original), obs: deu.obs }
+      };
+      const f = dias / 30;
+      const pension = r2(m.pension * f);
+      let totalDesc = 0;
+      for (const x of m.descuentos) {
+        const v = r2(x.valor * f);
+        totalDesc += v;
+        await conn.execute("UPDATE RPJ_PRC_NOMINA_DESCUENTO SET nde_valor = ? WHERE nde_correlativo = ?", [v, x.id]);
+      }
+      totalDesc = r2(totalDesc);
+      const liquido = Math.max(r2(pension - totalDesc), 0);
+      const recibido = r2((liquido * m.porcentaje) / 100);
+      await conn.execute(
+        "UPDATE RPJ_PRC_NOMINA_INGRESO SET nin_valor = ?, nin_valor_teorico = ?, nin_pago_corriente = ?, nin_dias_trabajados = ? WHERE nin_correlativo = ?",
+        [r2(recibido + totalDesc), pension, recibido, dias, ing.id]
+      );
+      await conn.execute(
+        `UPDATE RPJ_PRC_DEUDA_JUBILADO
+            SET deu_monto_original = ?, deu_monto_pendiente = GREATEST(? - deu_monto_pagado, 0),
+                deu_observaciones = LEFT(CONCAT(COALESCE(CONCAT(deu_observaciones, ' | '), ''), ?), 250)
+          WHERE deu_correlativo = ?`, [liquido, liquido, `Proporcional por fallecimiento (${dias}/30 días)`, m.deuda.id]
+      );
+      await conn.execute(
+        `UPDATE RPJ_PRC_DEUDA_JUBILADO SET deu_estado = CASE WHEN deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END
+          WHERE deu_correlativo = ?`, [m.deuda.id]
+      );
+      detalle.prorrateo.resultado = { pension, descuentos: totalDesc, liquido, recibido };
+    } else if (m) {
+      detalle.avisos.push(`El mes ${mes} no se ajustó proporcional: ${m.motivo}`);
+    }
+  }
+
+  // 2) Meses posteriores que solo eran deuda: se borran.
+  const [despues] = await conn.query(
+    `SELECT d.* FROM RPJ_PRC_DEUDA_JUBILADO d
+      WHERE d.deu_id_jubilado = ? AND d.deu_id_beneficiario IS NULL AND d.deu_periodo > ? AND d.deu_monto_pagado = 0
+        AND NOT EXISTS (SELECT 1 FROM RPJ_PRC_APLICACION_PAGO a WHERE a.apa_id_deuda = d.deu_correlativo)
+        AND NOT EXISTS (SELECT 1 FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+                         WHERE i.nin_id_jubilado = d.deu_id_jubilado AND i.nin_id_beneficiario IS NULL AND p.ppl_numero = d.deu_periodo
+                           AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso = 'CERRADA')`, [idJubilado, mes]
+  );
+  if (despues.length) {
+    detalle.borrados = despues.map((fila) => {
+      const o = {};
+      Object.entries(fila).forEach(([k, v]) => { o[k] = v instanceof Date ? v.toISOString().slice(0, 19).replace("T", " ") : v; });
+      return o;
+    });
+    await conn.query("DELETE FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_correlativo IN (?)", [despues.map((x) => x.deu_correlativo)]);
+  }
+
+  if (detalle.prorrateo || detalle.borrados.length) {
+    await conn.execute(
+      "INSERT INTO RPJ_PRC_AJUSTE_FALLECIMIENTO (afa_id_jubilado, afa_fecha_fallecimiento, afa_detalle, afa_usuario_creacion) VALUES (?, ?, ?, ?)",
+      [idJubilado, String(fecha).slice(0, 10), JSON.stringify(detalle), usuario]
+    );
+  }
+  return {
+    mes, dias, proporcional: detalle.prorrateo ? detalle.prorrateo.resultado : null,
+    mesesBorrados: detalle.borrados.map((b) => b.deu_periodo), avisos: detalle.avisos
+  };
+};
+
+const conTransaccion = async (fn) => {
+  const conn = await pool.getConnection();
+  try { await conn.beginTransaction(); const r = await fn(conn); await conn.commit(); return r; } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
+};
+
 const registrarFallecimiento = async (id, body, currentUser) => {
   await assertJubilado(id);
   if (!body?.fechaFallecimiento) throw createError("La fecha de fallecimiento es obligatoria");
@@ -390,7 +520,15 @@ const registrarFallecimiento = async (id, body, currentUser) => {
     [id, body.fechaFallecimiento, body.noDefuncion || null, usuario],
     ["p_ben", "p_res"]
   );
-  return { beneficiariosActivados: toNum(out.p_ben), message: out.p_res };
+  // Deuda: mes del fallecimiento proporcional y meses posteriores borrados.
+  let ajuste = null;
+  try {
+    ajuste = await conTransaccion((conn) => aplicarAjusteFallecimiento(conn, id, body.fechaFallecimiento, usuario));
+  } catch (e) {
+    logger.error("No se pudo ajustar la deuda por fallecimiento", { idJubilado: id, message: e.message });
+    ajuste = { avisos: ["No se pudo ajustar la deuda del mes del fallecimiento; revise el estado de cuenta."] };
+  }
+  return { beneficiariosActivados: toNum(out.p_ben), message: out.p_res, ajuste };
 };
 
 // ---------------------------------------------------------------------------
@@ -457,16 +595,22 @@ const corregirFallecimiento = async (id, body, currentUser) => {
   if (fecha > new Date().toISOString().slice(0, 10)) throw createError("La fecha de fallecimiento no puede ser futura");
   const noDef = String(body?.noDefuncion || "").trim();
   if (!noDef) throw createError("El No. de certificado de defunción es obligatorio");
-  await pool.execute(
-    "UPDATE RPJ_MNT_JUBILADO SET jub_fecha_fallecimiento = ?, jub_no_defuncion = ? WHERE jub_correlativo = ? AND jub_estado_pago = 'FALLECIDO'",
-    [fecha, noDef.slice(0, 50), id]
-  );
-  await pool.execute(
-    "UPDATE RPJ_MNT_BENEFICIARIO SET ben_fecha_activacion = ? WHERE ben_id_jubilado = ? AND ben_estado = 'ACTIVO'",
-    [fecha, id]
-  );
-  logger.info("Fecha de fallecimiento corregida", { idJubilado: id, fecha, usuario: currentUser?.usuario });
-  return { id: Number(id), fechaFallecimiento: fecha, aviso: avisoGeneradas(f) };
+  const usuario = currentUser?.usuario || "sistema";
+  // Con la fecha nueva se restaura el ajuste anterior de la deuda y se vuelve a calcular.
+  const ajuste = await conTransaccion(async (conn) => {
+    await conn.execute(
+      "UPDATE RPJ_MNT_JUBILADO SET jub_fecha_fallecimiento = ?, jub_no_defuncion = ? WHERE jub_correlativo = ? AND jub_estado_pago = 'FALLECIDO'",
+      [fecha, noDef.slice(0, 50), id]
+    );
+    await conn.execute(
+      "UPDATE RPJ_MNT_BENEFICIARIO SET ben_fecha_activacion = ? WHERE ben_id_jubilado = ? AND ben_estado = 'ACTIVO'",
+      [fecha, id]
+    );
+    await revertirAjusteFallecimiento(conn, id);
+    return f.enServicio ? null : aplicarAjusteFallecimiento(conn, id, fecha, usuario);
+  });
+  logger.info("Fecha de fallecimiento corregida", { idJubilado: id, fecha, usuario });
+  return { id: Number(id), fechaFallecimiento: fecha, aviso: avisoGeneradas(f), ajuste };
 };
 
 const revertirFallecimiento = async (id, body, currentUser) => {
@@ -487,6 +631,8 @@ const revertirFallecimiento = async (id, body, currentUser) => {
       `UPDATE RPJ_MNT_BENEFICIARIO SET ben_estado = 'REGISTRADO', ben_fecha_activacion = NULL
         WHERE ben_id_jubilado = ? AND ben_estado IN ('ACTIVO', 'INACTIVO')`, [id]
     );
+    // La deuda vuelve a como estaba antes del fallecimiento.
+    await revertirAjusteFallecimiento(conn, id);
     await conn.commit();
   } catch (e) {
     await conn.rollback();
