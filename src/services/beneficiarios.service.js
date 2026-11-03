@@ -576,7 +576,11 @@ const estadoCuenta = async (id) => {
   let fase;
   if (b.estado === "INACTIVO") fase = "TERMINADO";
   else if (b.estado === "REGISTRADO") fase = "AÚN NO COBRA (el jubilado no está registrado como fallecido)";
-  else if (esConyuge(b.parentesco)) fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO" : "VIUDEZ";
+  else if (esConyuge(b.parentesco)) {
+    const pendienteCodigo = historiaConCodigo.reduce((a, h) => a + (h.esDeuda ? toNum(h.saldo) : 0), 0);
+    fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO"
+      : pendienteCodigo > 0 ? "COBRANDO LO PENDIENTE DE LOS MESES CON EL CÓDIGO DEL FALLECIDO" : "VIUDEZ";
+  }
   else if (b.parentesco === "HIJO" && !esMenor) fase = "MAYOR DE EDAD: SE LE LIQUIDA LO QUE SE LE DEBE";
   else fase = "ORFANDAD";
 
