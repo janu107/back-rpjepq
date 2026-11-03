@@ -85,6 +85,17 @@ router.post(
 );
 
 router.use("/health", healthRoutes);
+// Panel principal (indicadores generales).
+router.use("/dashboard", (() => {
+  const r = require("express").Router();
+  const authMiddleware = require("../middlewares/auth.middleware");
+  const { authorizeRoles } = require("../middlewares/role.middleware");
+  const { successResponse } = require("../utils/response");
+  r.get("/general", authMiddleware, authorizeRoles("ADMIN", "OPERADOR"), async (req, res, next) => {
+    try { return successResponse(res, await require("../services/dashboardGeneral.service").general(), "Panel principal"); } catch (e) { next(e); }
+  });
+  return r;
+})());
 router.use("/auth", authRoutes);
 router.use("/usuarios", usuariosRoutes);
 router.use("/roles", rolesRoutes);
