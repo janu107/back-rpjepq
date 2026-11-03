@@ -303,7 +303,7 @@ const historiaSinCorte = async (id) => {
     if (resto > 0) grupos.otros = Math.round((grupos.otros + resto) * 100) / 100;
     // Mes del fallecimiento pagado proporcional: se indica cuántos días.
     const prop = String(r.deuObs || "").match(/Proporcional por fallecimiento \((\d+)\/30/);
-    if (prop) fila.tipoPago = `${fila.tipoPago} · ${prop[1]} días`;
+    if (prop) { fila.tipoPago = `${fila.tipoPago} · ${prop[1]} días`; fila.proporcional = true; }
     // Meses de la deuda que se pagaron fuera del sistema (cancelación registrada).
     if (r.canceladaDoc) return { ...fila, desglose: grupos, estado: "CANCELADA", canceladaFuera: r.canceladaDoc, canceladaMes: r.canceladaTipo === "MES" };
     return { ...fila, desglose: grupos };
@@ -875,13 +875,15 @@ const cancelacionMesVigente = async (conn, idJubilado, periodo) => {
   return c || null;
 };
 
+// Fecha y documento son opcionales: por defecto hoy y "Confirmado en estado de cuenta"
+// (queda el usuario que lo confirmó).
 const cancelarMesDeuda = async (id, periodo, body, currentUser) => {
-  const fecha = String(body?.fecha || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("Indique la fecha en que se pagó");
-  if (fecha > new Date().toISOString().slice(0, 10)) throw createError("La fecha no puede ser futura");
-  const documento = String(body?.documento || "").trim();
-  if (!documento) throw createError("Indique el documento que respalda el pago (acta, resolución, cheque, etc.)");
+  const hoy = new Date().toISOString().slice(0, 10);
+  const fecha = String(body?.fecha || hoy).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("La fecha no es válida");
+  if (fecha > hoy) throw createError("La fecha no puede ser futura");
   const usuario = currentUser?.usuario || "sistema";
+  const documento = String(body?.documento || "").trim() || `Confirmado en estado de cuenta (${usuario})`;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -1147,7 +1149,10 @@ const liquidacionPdf = async (id, user, opciones = {}) => {
   } else if (totalPendiente <= 0) {
     texto = "El jubilado no tiene deuda pendiente.";
   } else if (conyuge) {
-    const ultimo = deuda.length ? toNum(deuda[deuda.length - 1].montoGenerado) : 0;
+    // Último líquido completo: el mes del fallecimiento pagado proporcional no cuenta.
+    const completos = deuda.filter((h) => !h.proporcional);
+    const base = completos.length ? completos : deuda;
+    const ultimo = base.length ? toNum(base[base.length - 1].montoGenerado) : 0;
     const cuota = Math.round(ultimo * pct) / 100;
     texto = `${jub.estadoPago === "FALLECIDO" ? "Por el fallecimiento del jubilado, la" : "Si el jubilado fallece, la"} deuda pendiente de ${Q(totalPendiente)} se traslada a su cónyuge `
       + `${conyuge.nombre} (${conyuge.parentesco}), quien la cobra en la planilla de jubilados: ${Q(cuota)} por mes (el ${pct}% de su último líquido), `

@@ -529,7 +529,8 @@ const estadoCuenta = async (id) => {
       `SELECT COALESCE(SUM(deu_monto_original), 0) AS original, COALESCE(SUM(deu_monto_pagado), 0) AS pagado,
               COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente, SUM(deu_monto_pendiente > 0) AS mesesPendientes,
               MIN(CASE WHEN deu_monto_pendiente > 0 THEN deu_periodo END) AS proximoMes,
-              (SELECT deu_monto_original FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? ORDER BY deu_periodo DESC LIMIT 1) AS ultimoLiquido
+              (SELECT deu_monto_original FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ?
+                ORDER BY (COALESCE(deu_observaciones, '') LIKE '%Proporcional por fallecimiento%'), deu_periodo DESC LIMIT 1) AS ultimoLiquido
          FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_periodo <= ?`, [b.idJubilado, b.idJubilado, corte]
     );
     const [[c]] = await pool.query(
