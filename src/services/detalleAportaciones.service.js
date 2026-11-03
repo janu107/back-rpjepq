@@ -159,7 +159,7 @@ const bulkUpload = async (buffer, currentUser) => {
   }
 
   const createdBy = currentUser?.usuario || "sistema";
-  const summary = { totalFilas: 0, insertados: 0, omitidos: 0, errores: [] };
+  const summary = { totalFilas: 0, insertados: 0, omitidos: 0, sumados: 0, fecha: null, errores: [] };
 
   // 1) Leer y validar todas las filas.
   const filas = [];
@@ -182,6 +182,14 @@ const bulkUpload = async (buffer, currentUser) => {
     if (!(monto > 0)) { summary.errores.push({ fila: rowNumber, error: "Monto debe ser numerico y mayor a 0" }); continue; }
     filas.push({ rowNumber, idEmpleado, fecha, monto });
   }
+
+  // Un archivo = un período: todas las filas deben tener la misma fecha de pago.
+  const fechasArchivo = [...new Set(filas.map((f) => f.fecha))].sort();
+  if (fechasArchivo.length > 1) {
+    const muestra = fechasArchivo.slice(0, 5).map((f) => f.split("-").reverse().join("/")).join(", ");
+    throw createError(`El archivo debe ser de un solo período (una sola fecha de pago) y trae ${fechasArchivo.length} fechas: ${muestra}${fechasArchivo.length > 5 ? "…" : ""}. No se grabó nada.`);
+  }
+  summary.fecha = fechasArchivo[0] || null;
 
   if (filas.length) {
     // 2) Empleados EPQ de todo el archivo en una sola consulta (apo_id -> apo_correlativo).
@@ -206,15 +214,20 @@ const bulkUpload = async (buffer, currentUser) => {
       rows.forEach((r) => existentes.add(`${r.id}|${r.fecha}`));
     }
 
-    // 4) Lo nuevo (un repetido dentro del mismo archivo también se omite).
-    const nuevos = [];
+    // 4) Un aporte por empleado: si el código viene varias veces se suman sus montos.
+    //    Si ya tiene aporte en esa fecha (período ya cargado), se omite el empleado.
+    const porEmpleado = new Map();
     filas.forEach((f) => {
       const id = correlativo.get(f.idEmpleado);
       if (!id) { summary.errores.push({ fila: f.rowNumber, error: `No existe aportacion con ID ${f.idEmpleado}` }); return; }
-      const clave = `${id}|${f.fecha}`;
-      if (existentes.has(clave)) { summary.omitidos += 1; return; }
-      existentes.add(clave);
-      nuevos.push([id, f.fecha, f.monto, createdBy]);
+      const actual = porEmpleado.get(id);
+      if (actual) { actual.monto = Math.round((actual.monto + f.monto) * 100) / 100; summary.sumados += 1; }
+      else porEmpleado.set(id, { id, fecha: f.fecha, monto: f.monto });
+    });
+    const nuevos = [];
+    porEmpleado.forEach((a) => {
+      if (existentes.has(`${a.id}|${a.fecha}`)) { summary.omitidos += 1; return; }
+      nuevos.push([a.id, a.fecha, a.monto, createdBy]);
     });
 
     // 5) Guardar de 1,000 en 1,000 en una sola transacción: o entra todo o nada.
@@ -272,10 +285,10 @@ const plantillaCarga = async () => {
     ["Reglas"],
     ["1. Llene la hoja \"Aportaciones\" (la primera). No cambie los encabezados de la fila 1."],
     ["2. ID EMPLEADO: el código del empleado EPQ (el mismo de Mantenimiento EPQ › Empleados EPQ)."],
-    ["3. FECHA: la fecha de pago del aporte. Como fecha de Excel, o escrita 31/10/2026 o 2026-10-31."],
+    ["3. FECHA: la fecha de pago del período (por ejemplo el último día del mes). TODAS las filas deben tener la MISMA fecha: un archivo = un período."],
     ["4. MONTO: el valor del aporte, mayor a cero, sin la letra Q (por ejemplo 250.50)."],
-    ["5. Una fila por aporte. Las filas vacías se ignoran."],
-    ["6. Si ya existe un aporte del mismo empleado en la misma fecha, esa fila se omite (no se duplica ni se cambia)."],
+    ["5. Si un código viene varias veces, sus montos se SUMAN en un solo aporte. Las filas vacías se ignoran."],
+    ["6. Si el empleado ya tiene aporte en esa fecha (período ya cargado), se omite; los demás sí se graban."],
     ["7. Archivo .xlsx de máximo 5 MB. Al terminar el sistema muestra cuántas filas se agregaron, se omitieron y cuáles tuvieron error."],
     [],
     ["Ejemplo (así deben verse las filas en la hoja \"Aportaciones\")"]
@@ -287,8 +300,10 @@ const plantillaCarga = async () => {
   const ej = inst.addRow(["ID EMPLEADO", "FECHA", "MONTO"]);
   ej.font = { bold: true, color: { argb: "FFFFFFFF" } };
   [1, 2, 3].forEach((i) => { ej.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E5F" } }; });
-  [[1234, new Date(Date.UTC(2026, 9, 31)), 250.5], [1234, new Date(Date.UTC(2026, 10, 30)), 250.5], [5678, new Date(Date.UTC(2026, 9, 31)), 310]]
+  [[1234, new Date(Date.UTC(2026, 10, 30)), 250.5], [5678, new Date(Date.UTC(2026, 10, 30)), 310], [5678, new Date(Date.UTC(2026, 10, 30)), 40]]
     .forEach((r) => { const x = inst.addRow(r); x.getCell(2).numFmt = "dd/mm/yyyy"; x.getCell(3).numFmt = "#,##0.00"; });
+  inst.addRow([]);
+  inst.addRow(["Resultado: se graban 2 aportes con fecha 30/11/2026: el 1234 por Q250.50 y el 5678 por Q350.00 (310 + 40)."]);
   return { buffer: await wb.xlsx.writeBuffer(), filename: "plantilla_carga_aportaciones.xlsx" };
 };
 
