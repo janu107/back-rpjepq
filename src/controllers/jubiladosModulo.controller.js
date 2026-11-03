@@ -22,6 +22,8 @@ const estadoCuentaPdf = async (req, res, next) => {
 
 const fallecidos = async (req, res, next) => { try { return successResponse(res, await service.listarFallecidos(), "Fallecimientos registrados"); } catch (e) { next(e); } };
 const corregirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.corregirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento corregido"); } catch (e) { next(e); } };
+const cancelarMes = async (req, res, next) => { try { return successResponse(res, await service.cancelarMesDeuda(req.params.id, req.params.periodo, req.body, req.user), "Mes marcado como pagado"); } catch (e) { next(e); } };
+const revertirCancelacionMes = async (req, res, next) => { try { return successResponse(res, await service.revertirCancelacionMes(req.params.id, req.params.periodo, req.body, req.user), "Mes vuelve a quedar pendiente"); } catch (e) { next(e); } };
 const descuentosMes = async (req, res, next) => { try { return successResponse(res, await service.descuentosMes(req.params.id, req.params.periodo), "Descuentos del mes"); } catch (e) { next(e); } };
 const editarDescuentosMes = async (req, res, next) => { try { return successResponse(res, await service.editarDescuentosMes(req.params.id, req.params.periodo, req.body, req.user), "Descuentos del mes actualizados"); } catch (e) { next(e); } };
 const liquidacionPdf = async (req, res, next) => {
@@ -38,7 +40,7 @@ const revertirCancelacion = async (req, res, next) => { try { return successResp
 const revertirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.revertirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento revertido"); } catch (e) { next(e); } };
 
 module.exports = {
-  fallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeuda, revertirCancelacion, fallecidoEnServicio, descuentosMes, editarDescuentosMes, liquidacionPdf,
+  fallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeuda, revertirCancelacion, fallecidoEnServicio, descuentosMes, editarDescuentosMes, liquidacionPdf, cancelarMes, revertirCancelacionMes,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, fallecimiento, estadoCuentaPdf
 };

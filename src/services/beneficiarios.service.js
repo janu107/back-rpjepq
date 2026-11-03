@@ -540,7 +540,7 @@ const estadoCuenta = async (id) => {
     );
     const [[can]] = await pool.query(
       `SELECT cde_fecha AS fecha, cde_documento AS documento, cde_monto AS monto, cde_meses AS meses
-         FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_id_jubilado = ? AND cde_estado = 'VIGENTE'
+         FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_id_jubilado = ? AND cde_estado = 'VIGENTE' AND cde_tipo = 'TOTAL'
         ORDER BY cde_correlativo DESC LIMIT 1`, [b.idJubilado]
     );
     const cuota = Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
