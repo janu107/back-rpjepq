@@ -22,13 +22,23 @@ const estadoCuentaPdf = async (req, res, next) => {
 
 const fallecidos = async (req, res, next) => { try { return successResponse(res, await service.listarFallecidos(), "Fallecimientos registrados"); } catch (e) { next(e); } };
 const corregirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.corregirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento corregido"); } catch (e) { next(e); } };
+const descuentosMes = async (req, res, next) => { try { return successResponse(res, await service.descuentosMes(req.params.id, req.params.periodo), "Descuentos del mes"); } catch (e) { next(e); } };
+const editarDescuentosMes = async (req, res, next) => { try { return successResponse(res, await service.editarDescuentosMes(req.params.id, req.params.periodo, req.body, req.user), "Descuentos del mes actualizados"); } catch (e) { next(e); } };
+const liquidacionPdf = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.liquidacionPdf(req.params.id, req.user, req.query);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (e) { next(e); }
+};
 const fallecidoEnServicio = async (req, res, next) => { try { return successResponse(res, await service.registrarFallecidoEnServicio(req.body, req.user), "Fallecido en servicio registrado"); } catch (e) { next(e); } };
 const cancelarDeuda = async (req, res, next) => { try { return successResponse(res, await service.cancelarDeudaFallecido(req.params.id, req.body, req.user), "Deuda registrada como cancelada"); } catch (e) { next(e); } };
 const revertirCancelacion = async (req, res, next) => { try { return successResponse(res, await service.revertirCancelacionDeuda(req.params.id, req.body, req.user), "Cancelación revertida"); } catch (e) { next(e); } };
 const revertirFallecimiento = async (req, res, next) => { try { return successResponse(res, await service.revertirFallecimiento(req.params.id, req.body, req.user), "Fallecimiento revertido"); } catch (e) { next(e); } };
 
 module.exports = {
-  fallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeuda, revertirCancelacion, fallecidoEnServicio,
+  fallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeuda, revertirCancelacion, fallecidoEnServicio, descuentosMes, editarDescuentosMes, liquidacionPdf,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, fallecimiento, estadoCuentaPdf
 };

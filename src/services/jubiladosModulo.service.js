@@ -704,6 +704,264 @@ const revertirCancelacionDeuda = async (id, body, currentUser) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Ajuste de descuentos de un mes de la historia (meses de la carga histórica).
+// Sirve para cuadrar, por ejemplo, el último mes de un préstamo cuyo saldo era
+// menor a la cuota. Al guardar: líquido = pensión − descuentos; "recibido en el
+// mes" = líquido × % de la planilla (como lo calculó la carga); la deuda del mes
+// vale su líquido y su pendiente = líquido − lo ya abonado.
+// ---------------------------------------------------------------------------
+const mesHistoria = async (idJubilado, periodo, conn = pool) => {
+  const [[pl]] = await conn.query(
+    `SELECT p.ppl_correlativo AS id, p.ppl_numero AS numero, p.ppl_estado_proceso AS estado, p.ppl_tipo_planilla AS tipo
+       FROM RPJ_CAT_PARAMETRO_PLANILLA p
+       JOIN RPJ_PRC_NOMINA_INGRESO i ON i.nin_id_planilla = p.ppl_correlativo AND i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL
+      WHERE p.ppl_numero = ? AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'
+      ORDER BY p.ppl_correlativo DESC LIMIT 1`, [idJubilado, periodo]
+  );
+  if (!pl) throw createError("No hay planilla de ese mes para el jubilado", 404);
+  const [ingresos] = await conn.query(
+    `SELECT nin_correlativo AS id, nin_tipo_ingreso AS tipo, nin_valor AS valor, nin_valor_teorico AS pension,
+            nin_porcentaje_aplicado AS pct, nin_pago_corriente AS pagoCorriente, nin_abono_historico AS abono
+       FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_id_planilla = ? AND nin_id_jubilado = ? AND nin_id_beneficiario IS NULL`, [pl.id, idJubilado]
+  );
+  const [descuentos] = await conn.query(
+    `SELECT d.nde_correlativo AS id, d.nde_tipo_descuento AS tipo, COALESCE(t.tde_descripcion, 'DESCUENTO') AS descripcion, d.nde_valor AS valor
+       FROM RPJ_PRC_NOMINA_DESCUENTO d LEFT JOIN RPJ_CAT_TIPO_DESCUENTO t ON t.tde_id = d.nde_tipo_descuento
+      WHERE d.nde_id_planilla = ? AND d.nde_id_jubilado = ? AND d.nde_id_beneficiario IS NULL ORDER BY d.nde_correlativo`, [pl.id, idJubilado]
+  );
+  const [[deu]] = await conn.query(
+    `SELECT deu_correlativo AS id, deu_monto_original AS original, deu_monto_pagado AS pagado, deu_monto_pendiente AS pendiente,
+            deu_estado AS estado, deu_observaciones AS obs
+       FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_periodo = ? AND deu_id_beneficiario IS NULL LIMIT 1`, [idJubilado, periodo]
+  );
+  const [[abonos]] = await conn.query(
+    "SELECT COUNT(*) AS n FROM RPJ_PRC_APLICACION_PAGO WHERE apa_id_planilla = ? AND apa_id_jubilado = ?", [pl.id, idJubilado]
+  );
+  // Solo meses de la carga histórica: su planilla está cerrada, el mes tiene deuda,
+  // hay un solo ingreso y esa planilla no abonó a otros meses (no se cerró en el sistema).
+  let motivo = null;
+  if (pl.estado !== "CERRADA") motivo = "La planilla de ese mes no está cerrada: edítela desde la planilla.";
+  else if (!deu) motivo = "Ese mes no tiene deuda (se pagó completo).";
+  else if (ingresos.length !== 1) motivo = "Ese mes tiene varios ingresos: edítelo desde la planilla.";
+  else if (toNum(abonos.n) > 0) motivo = "La planilla de ese mes ya abonó a la deuda: no se cambia desde aquí.";
+  const ing = ingresos[0] || {};
+  return {
+    planilla: pl, periodo: Number(periodo), editable: !motivo, motivo,
+    pension: toNum(ing.pension), porcentaje: toNum(ing.pct || 50), recibido: Math.round((toNum(ing.valor) - descuentos.reduce((a, x) => a + toNum(x.valor), 0)) * 100) / 100,
+    ingreso: ing.id ? { id: ing.id, valor: toNum(ing.valor) } : null,
+    descuentos: descuentos.map((x) => ({ ...x, valor: toNum(x.valor) })),
+    deuda: deu ? { id: deu.id, original: toNum(deu.original), pagado: toNum(deu.pagado), pendiente: toNum(deu.pendiente), estado: deu.estado } : null
+  };
+};
+
+const tiposDescuento = async () => (await pool.query("SELECT tde_id AS id, tde_descripcion AS descripcion FROM RPJ_CAT_TIPO_DESCUENTO ORDER BY tde_id"))[0];
+
+const descuentosMes = async (idJubilado, periodo) => ({ ...(await mesHistoria(idJubilado, periodo)), tipos: await tiposDescuento() });
+
+// payload: { descuentos: [{ id?, tipo, valor }] } con TODOS los descuentos del mes
+// (los que no vengan se borran).
+const editarDescuentosMes = async (idJubilado, periodo, payload, currentUser) => {
+  const lista = Array.isArray(payload?.descuentos) ? payload.descuentos : [];
+  for (const x of lista) {
+    if (!(Number(x.tipo) > 0)) throw createError("Cada descuento necesita su tipo");
+    if (Number.isNaN(Number(x.valor)) || Number(x.valor) < 0) throw createError("Los montos de descuento deben ser números mayores o iguales a 0");
+  }
+  const usuario = currentUser?.usuario || "sistema";
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const m = await mesHistoria(idJubilado, periodo, conn);
+    if (!m.editable) throw createError(m.motivo, 409);
+    const total = Math.round(lista.reduce((a, x) => a + Number(x.valor), 0) * 100) / 100;
+    if (total > m.pension) throw createError(`Los descuentos (Q${total.toFixed(2)}) no pueden ser mayores que la pensión (Q${m.pension.toFixed(2)})`);
+    const antes = m.descuentos.map((d) => `${d.descripcion} ${d.valor.toFixed(2)}`).join(", ");
+
+    // Descuentos: actualizar, agregar y borrar.
+    const ids = new Set(lista.filter((x) => x.id).map((x) => Number(x.id)));
+    const borrar = m.descuentos.filter((d) => !ids.has(Number(d.id))).map((d) => d.id);
+    if (borrar.length) await conn.query("DELETE FROM RPJ_PRC_NOMINA_DESCUENTO WHERE nde_correlativo IN (?) AND nde_id_planilla = ? AND nde_id_jubilado = ?", [borrar, m.planilla.id, idJubilado]);
+    const [[base]] = await conn.query(
+      "SELECT nin_tipo_manejo AS tm, nin_id_tipo_planilla AS tp, nin_dias_trabajados AS dias, nin_puesto AS puesto, nin_area AS area FROM RPJ_PRC_NOMINA_INGRESO WHERE nin_correlativo = ?", [m.ingreso.id]
+    );
+    for (const x of lista) {
+      const valor = Math.round(Number(x.valor) * 100) / 100;
+      if (x.id && m.descuentos.some((d) => Number(d.id) === Number(x.id))) {
+        await conn.execute("UPDATE RPJ_PRC_NOMINA_DESCUENTO SET nde_valor = ?, nde_tipo_descuento = ? WHERE nde_correlativo = ? AND nde_id_jubilado = ?", [valor, Number(x.tipo), x.id, idJubilado]);
+      } else if (valor > 0) {
+        await conn.execute(
+          `INSERT INTO RPJ_PRC_NOMINA_DESCUENTO (nde_tipo_manejo, nde_id_tipo_planilla, nde_id_planilla, nde_id_jubilado, nde_tipo_descuento, nde_valor,
+             nde_dias_trabajados, nde_puesto, nde_area, nde_usuario_creacion)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [base.tm, base.tp, m.planilla.id, idJubilado, Number(x.tipo), valor, base.dias || 30, base.puesto || "JUBILADO", base.area || "JUBILADOS", usuario]
+        );
+      }
+    }
+
+    // Líquido, recibido (al % de la planilla) y deuda del mes.
+    const liquido = Math.max(Math.round((m.pension - total) * 100) / 100, 0);
+    const recibido = Math.round(liquido * m.porcentaje) / 100;
+    await conn.execute(
+      "UPDATE RPJ_PRC_NOMINA_INGRESO SET nin_valor = ?, nin_pago_corriente = ? WHERE nin_correlativo = ?",
+      [Math.round((recibido + total) * 100) / 100, recibido, m.ingreso.id]
+    );
+    const nota = `Ajuste de descuentos ${new Date().toISOString().slice(0, 10)} (${usuario}): antes ${antes || "sin descuentos"}`;
+    await conn.execute(
+      `UPDATE RPJ_PRC_DEUDA_JUBILADO
+          SET deu_monto_original = ?, deu_monto_pendiente = GREATEST(? - deu_monto_pagado, 0),
+              deu_observaciones = LEFT(CONCAT(COALESCE(CONCAT(deu_observaciones, ' | '), ''), ?), 250)
+        WHERE deu_correlativo = ?`, [liquido, liquido, nota, m.deuda.id]
+    );
+    // El estado se recalcula aparte, con los montos ya actualizados.
+    await conn.execute(
+      `UPDATE RPJ_PRC_DEUDA_JUBILADO
+          SET deu_estado = CASE WHEN deu_monto_pendiente <= 0 THEN 'PAGADA' WHEN deu_monto_pagado > 0 THEN 'PARCIAL' ELSE 'PENDIENTE' END,
+              deu_fecha_saldada = CASE WHEN deu_monto_pendiente <= 0 THEN COALESCE(deu_fecha_saldada, CURDATE()) ELSE NULL END
+        WHERE deu_correlativo = ?`, [m.deuda.id]
+    );
+    await conn.commit();
+    logger.info("Descuentos de un mes de la historia ajustados", { idJubilado, periodo, antes, total, liquido, recibido, usuario });
+    return { ...(await mesHistoria(idJubilado, periodo)), liquido };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Liquidación de la deuda del jubilado (PDF): lo que se le debe mes a mes, el total
+// y a quién se traslada si falleció (el cónyuge la cobra con la regla de la planilla).
+// Solo documento: no mueve dinero.
+// ---------------------------------------------------------------------------
+const liquidacionPdf = async (id, user, opciones = {}) => {
+  const L = require("../utils/pdfLayout");
+  const { numeroALetras } = require("../utils/numeroALetras");
+  const resumen = await resumenFinanciero(id);
+  const historia = await historiaCompleta(id);
+  const [[jub]] = await pool.execute(
+    `SELECT jub_id AS codigo, CONCAT(jub_nombres, ' ', jub_apellidos) AS nombre, jub_dpi AS dpi, jub_fecha_jubilacion AS fechaJubilacion,
+            jub_estado_pago AS estadoPago, jub_fecha_fallecimiento AS fechaFallecimiento,
+            (SELECT tju_descripcion FROM RPJ_CAT_TIPO_JUBILACION WHERE tju_id = jub_tipo_jubilacion) AS tipo
+       FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?`, [id]
+  );
+  const [bens] = await pool.query(
+    `SELECT ben_correlativo AS id, TRIM(CONCAT(COALESCE(ben_nombres, ''), ' ', ben_apellidos)) AS nombre, ben_tipo_parentesco AS parentesco,
+            ben_monto AS monto, ben_porcentaje AS pct, ben_estado AS estado
+       FROM RPJ_MNT_BENEFICIARIO WHERE ben_id_jubilado = ? AND ben_estado <> 'INACTIVO' ORDER BY ben_correlativo`, [id]
+  );
+  const MES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const per = (p) => { const n = Number(p); return `${MES[(n % 100) - 1]} ${Math.floor(n / 100)}`; };
+  const Q = (n) => `Q${L.q(n)}`;
+  const deuda = historia.filter((h) => h.esDeuda);
+  const tot = (k) => Math.round(deuda.reduce((a, h) => a + toNum(h[k]), 0) * 100) / 100;
+  const totalDeuda = tot("montoGenerado");
+  const totalAbonado = tot("montoPagado");
+  const totalPendiente = tot("saldo");
+
+  const doc = L.nuevoDoc(L.CARTA);
+  const ancho = L.anchoUtil(doc);
+  const x0 = doc.page.margins.left;
+  const cabecera = (d) => L.encabezado(d, {
+    titulo: "LIQUIDACIÓN DE DEUDA CON EL JUBILADO", institucion: L.INSTITUCION_CORTA,
+    subtitulo: `${jub.codigo} — ${jub.nombre}  ·  al ${L.fecha(new Date())}`
+  });
+  cabecera(doc);
+
+  const datos = [
+    ["Código", jub.codigo], ["DPI", jub.dpi || "—"], ["Tipo de jubilación", jub.tipo || "—"], ["Pensión mensual", Q(resumen.pension)],
+    ["Fecha de jubilación", L.fecha(jub.fechaJubilacion)],
+    [jub.estadoPago === "FALLECIDO" ? "Fecha de fallecimiento" : "Estado", jub.estadoPago === "FALLECIDO" ? L.fecha(jub.fechaFallecimiento) : jub.estadoPago],
+    ["Meses con deuda", String(deuda.length)], ["Meses pendientes", String(deuda.filter((h) => toNum(h.saldo) > 0).length)]
+  ];
+  const col = ancho / 4;
+  let y = doc.y;
+  datos.forEach(([k, v], i) => {
+    const x = x0 + (i % 4) * col;
+    if (i % 4 === 0 && i > 0) y += 24;
+    doc.font("Helvetica").fontSize(7).fillColor("#666666").text(k, x, y, { width: col - 6 });
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000").text(String(v), x, y + 8, { width: col - 6, lineBreak: false, ellipsis: true });
+  });
+  doc.y = y + 30;
+
+  // Resumen en recuadro.
+  const yR = doc.y;
+  doc.save().roundedRect(x0, yR, ancho, 44, 4).fill("#F3F6F8").restore();
+  const tres = [["Total que se le debía", Q(totalDeuda)], ["Abonado", Q(totalAbonado)], ["Deuda pendiente", Q(totalPendiente)]];
+  tres.forEach(([k, v], i) => {
+    const x = x0 + 10 + i * (ancho / 3);
+    doc.font("Helvetica").fontSize(7.5).fillColor("#555555").text(k, x, yR + 8, { width: ancho / 3 - 20 });
+    doc.font("Helvetica-Bold").fontSize(i === 2 ? 13 : 11).fillColor(i === 2 ? "#B00020" : "#1F4E5F").text(v, x, yR + 20, { width: ancho / 3 - 20 });
+  });
+  doc.fillColor("#000000");
+  doc.y = yR + 52;
+  doc.font("Helvetica").fontSize(8).text(`Deuda pendiente: ${numeroALetras(totalPendiente)}`, x0, doc.y, { width: ancho });
+  doc.moveDown(0.6);
+
+  // Traslado.
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#1F4E5F").text("Traslado de la deuda", x0, doc.y, { width: ancho }).fillColor("#000000");
+  doc.moveDown(0.2);
+  const conyuge = bens.find((b) => ["ESPOSA", "ESPOSO"].includes(String(b.parentesco).toUpperCase()));
+  const cancel = resumen.fallecimiento?.cancelacion;
+  const pct = 50;
+  let texto;
+  if (cancel) {
+    texto = `La deuda del fallecido se registró como pagada fuera del sistema el ${L.fecha(cancel.fecha)} (${cancel.documento}) por ${Q(cancel.monto)}.`;
+  } else if (totalPendiente <= 0) {
+    texto = "El jubilado no tiene deuda pendiente.";
+  } else if (conyuge) {
+    const ultimo = deuda.length ? toNum(deuda[deuda.length - 1].montoGenerado) : 0;
+    const cuota = Math.round(ultimo * pct) / 100;
+    texto = `${jub.estadoPago === "FALLECIDO" ? "Por el fallecimiento del jubilado, la" : "Si el jubilado fallece, la"} deuda pendiente de ${Q(totalPendiente)} se traslada a su cónyuge `
+      + `${conyuge.nombre} (${conyuge.parentesco}), quien la cobra en la planilla de jubilados: ${Q(cuota)} por mes (el ${pct}% de su último líquido), `
+      + `abonando del mes más antiguo al más nuevo${cuota > 0 ? `, en aproximadamente ${Math.ceil(totalPendiente / cuota)} meses` : ""}. Al terminarla pasa a cobrar su pensión por viudez.`;
+  } else {
+    texto = `No hay cónyuge registrado como beneficiario: la deuda pendiente de ${Q(totalPendiente)} queda a favor de quien determine la resolución correspondiente.`;
+  }
+  doc.font("Helvetica").fontSize(8.5).text(texto, x0, doc.y, { width: ancho, align: "justify" });
+  if (bens.length) {
+    doc.moveDown(0.3);
+    doc.font("Helvetica").fontSize(7.5).fillColor("#444444")
+      .text(`Beneficiarios registrados: ${bens.map((b) => `${b.nombre} (${b.parentesco}${b.monto ? `, ${Q(b.monto)}/mes` : ""})`).join("; ")}.`, x0, doc.y, { width: ancho })
+      .fillColor("#000000");
+  }
+  doc.moveDown(0.6);
+
+  // Detalle mes a mes.
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#1F4E5F").text("Detalle de la deuda por mes", x0, doc.y, { width: ancho }).fillColor("#000000");
+  doc.moveDown(0.2);
+  const anchos = L.repartirAnchos(doc, [10, 13, 13, 13, 13, 13, 13, 12]);
+  const columnas = [
+    { titulo: "MES", valor: (f) => per(f.periodo), ancho: anchos[0] },
+    { titulo: "PENSIÓN", campo: "pensionCompleta", valor: (f) => L.q(f.pensionCompleta), align: "right", ancho: anchos[1] },
+    { titulo: "DESCUENTOS", campo: "descuentos", valor: (f) => L.q(f.descuentos), align: "right", ancho: anchos[2] },
+    { titulo: "SE LE DEBÍA", campo: "montoGenerado", valor: (f) => L.q(f.montoGenerado), align: "right", ancho: anchos[3] },
+    { titulo: "RECIBIDO", campo: "recibidoMes", valor: (f) => L.q(f.recibidoMes), align: "right", ancho: anchos[4] },
+    { titulo: "ABONADO", campo: "montoPagado", valor: (f) => L.q(f.montoPagado), align: "right", ancho: anchos[5] },
+    { titulo: "PENDIENTE", campo: "saldo", valor: (f) => L.q(f.saldo), align: "right", ancho: anchos[6] },
+    { titulo: "ESTADO", campo: "estado", ancho: anchos[7] }
+  ];
+  L.dibujarTabla(doc, columnas, deuda, { fuente: 7, alturaFila: 12, altoEncabezado: 16, reservaInferior: 90, alRepetirEncabezado: cabecera });
+  L.filaTotales(doc, columnas, {
+    descuentos: L.q(tot("descuentos")), montoGenerado: L.q(totalDeuda), recibidoMes: L.q(tot("recibidoMes")),
+    montoPagado: L.q(totalAbonado), saldo: L.q(totalPendiente)
+  }, "TOTALES", 2, { fuente: 7 });
+  doc.moveDown(0.6);
+  doc.font("Helvetica").fontSize(7).fillColor("#555555").text(
+    "Regla: desde enero 2023 cada mes se debe completo (su líquido = pensión − descuentos); lo recibido antes de la regla no se abona a la deuda; "
+    + "cada planilla cerrada abona su pago al mes pendiente más antiguo.", x0, doc.y, { width: ancho }).fillColor("#000000");
+
+  let firmas = [];
+  try { firmas = opciones.firmas ? JSON.parse(opciones.firmas) : []; } catch { firmas = []; }
+  if (!firmas.length) firmas = [{ rol: "Elaborado por" }, { rol: "Revisado por" }, { rol: "Autorizado por" }];
+  doc.moveDown(2);
+  L.bloqueFirmas(doc, firmas);
+  L.marcaImpresion(doc);
+  logger.info("Liquidación de deuda generada", { idJubilado: id, totalPendiente, usuario: user?.usuario });
+  return { buffer: await L.aBuffer(doc), filename: `liquidacion_deuda_${jub.codigo}.pdf` };
+};
+
 // PDF de estado de cuenta (carta). Mismo estilo de los reportes formales
 // (utils/pdfLayout): encabezado institucional con logo, datos del jubilado,
 // resumen, explicación y el detalle mes a mes de la deuda.
@@ -823,7 +1081,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
 
 module.exports = {
   listarFallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeudaFallecido, revertirCancelacionDeuda,
-  registrarFallecidoEnServicio,
+  registrarFallecidoEnServicio, descuentosMes, editarDescuentosMes, liquidacionPdf,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, historiaDespuesDeFallecer, mesFallecimiento, registrarFallecimiento,
   generarEstadoCuentaPdf
