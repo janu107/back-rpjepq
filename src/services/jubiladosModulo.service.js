@@ -66,6 +66,19 @@ const noAmparistas = async (q) => {
   return rows.map(mapJubBusqueda);
 };
 
+// Mes (AAAAMM) en que falleció, si está registrado como fallecido. Lo cobrado con
+// su código DESPUÉS de ese mes lo cobró su cónyuge (por ejemplo, si el fallecimiento
+// se registró años después): se muestra en el estado de cuenta del cónyuge.
+const mesFallecimiento = async (id) => {
+  const [[r]] = await pool.execute(
+    "SELECT jub_estado_pago AS estadoPago, jub_fecha_fallecimiento AS fecha FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]
+  );
+  if (!r || r.estadoPago !== "FALLECIDO" || !r.fecha) return null;
+  const f = new Date(r.fecha);
+  return f.getUTCFullYear() * 100 + f.getUTCMonth() + 1;
+};
+const SIN_CORTE = 999999;
+
 const assertJubilado = async (id) => {
   const [rows] = await pool.execute("SELECT jub_correlativo FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]);
   if (!rows[0]) throw createError("Jubilado no encontrado", 404);
@@ -111,6 +124,8 @@ const resumenFinanciero = async (id) => {
       WHERE sal_id_jubilado = ? AND sal_tipo_manejo = 2 AND sal_tipo_ingreso = 1
       ORDER BY sal_correlativo LIMIT 1`, [id]
   );
+  // Si falleció, lo suyo llega hasta el mes del fallecimiento; lo posterior lo cobró su cónyuge.
+  const corte = (await mesFallecimiento(id)) || SIN_CORTE;
   // Deuda: RPJ_PRC_DEUDA_JUBILADO es la tabla que llenan la carga histórica y la
   // nómina mensual (la que de verdad cobra). RPJ_MNT_DEUDA no la llena ningún
   // proceso; por eso antes todo salía en cero.
@@ -118,7 +133,7 @@ const resumenFinanciero = async (id) => {
     `SELECT COALESCE(SUM(CASE WHEN deu_estado IN ('PENDIENTE','PARCIAL') THEN deu_monto_pendiente ELSE 0 END),0) AS deudaPendiente,
             COALESCE(SUM(CASE WHEN deu_estado IN ('PENDIENTE','PARCIAL') THEN 1 ELSE 0 END),0) AS periodosDeuda,
             COALESCE(SUM(deu_monto_original),0) AS deudaGenerada
-       FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_id_beneficiario IS NULL`, [id]
+       FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_id_beneficiario IS NULL AND deu_periodo <= ?`, [id, corte]
   );
   // Pagos: lo que realmente recibió (ingreso − descuentos) en las planillas de
   // jubilados (incluidas las históricas) y cuántos meses ha tenido pago.
@@ -127,19 +142,29 @@ const resumenFinanciero = async (id) => {
             - COALESCE((SELECT SUM(d.nde_valor) FROM RPJ_PRC_NOMINA_DESCUENTO d
                           INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p2 ON p2.ppl_correlativo = d.nde_id_planilla
                          WHERE d.nde_id_jubilado = ? AND d.nde_id_beneficiario IS NULL AND d.nde_tipo_manejo = 2
-                           AND p2.ppl_tipo_planilla IN (2, 4) AND p2.ppl_estado_proceso <> 'REVERSADA'), 0) AS totalPagado,
+                           AND p2.ppl_tipo_planilla IN (2, 4) AND p2.ppl_estado_proceso <> 'REVERSADA' AND p2.ppl_numero <= ?), 0) AS totalPagado,
             COUNT(DISTINCT p.ppl_numero) AS periodosHistoria
        FROM RPJ_PRC_NOMINA_INGRESO i
        INNER JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
       WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND i.nin_tipo_manejo = 2
-        AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA'`, [id, id]
+        AND p.ppl_tipo_planilla IN (2, 4) AND p.ppl_estado_proceso <> 'REVERSADA' AND p.ppl_numero <= ?`, [id, corte, id, corte]
   );
   let fallecimiento = null;
   if (jub.estadoPago === "FALLECIDO") {
     const [[fx]] = await pool.execute(
       "SELECT jub_fecha_fallecimiento AS fecha, jub_no_defuncion AS certificado FROM RPJ_MNT_JUBILADO WHERE jub_correlativo = ?", [id]
     );
-    fallecimiento = { fecha: fx?.fecha || null, certificado: fx?.certificado || null, cancelacion: await cancelacionVigente(id) };
+    // Lo cobrado con su código después de fallecer (lo cobró su cónyuge).
+    const [[desp]] = await pool.execute(
+      `SELECT COUNT(DISTINCT p.ppl_numero) AS meses, MIN(p.ppl_numero) AS desde, MAX(p.ppl_numero) AS hasta
+         FROM RPJ_PRC_NOMINA_INGRESO i JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
+        WHERE i.nin_id_jubilado = ? AND i.nin_id_beneficiario IS NULL AND p.ppl_tipo_planilla IN (2, 4)
+          AND p.ppl_estado_proceso <> 'REVERSADA' AND p.ppl_numero > ?`, [id, corte]
+    );
+    fallecimiento = {
+      fecha: fx?.fecha || null, certificado: fx?.certificado || null, cancelacion: await cancelacionVigente(id), mes: corte,
+      cobradoPorConyuge: toNum(desp?.meses) > 0 ? { meses: toNum(desp.meses), desde: desp.desde, hasta: desp.hasta } : null
+    };
   }
   return {
     ...mapJubBusqueda(jub),
@@ -156,6 +181,7 @@ const resumenFinanciero = async (id) => {
 const ultimosPagos = async (id, limit) => {
   await assertJubilado(id);
   const lim = Math.min(Math.max(parseInt(limit, 10) || 12, 1), 60);
+  const corte = (await mesFallecimiento(id)) || SIN_CORTE;
   const [rows] = await pool.query(
     `SELECT i.nin_correlativo AS id, i.nin_id_planilla AS idPlanilla, p.ppl_numero AS periodo,
             p.ppl_fecha_pago AS fechaPago, i.nin_valor AS bruto, i.nin_pago_corriente AS pagoCorriente,
@@ -166,8 +192,9 @@ const ultimosPagos = async (id, limit) => {
        LEFT JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = i.nin_id_planilla
       WHERE i.nin_id_jubilado = ? AND i.nin_tipo_manejo = 2 AND i.nin_id_beneficiario IS NULL
         AND (p.ppl_estado_proceso IS NULL OR p.ppl_estado_proceso <> 'REVERSADA')
+        AND (p.ppl_numero IS NULL OR p.ppl_numero <= ?)
       ORDER BY p.ppl_numero DESC, i.nin_correlativo DESC LIMIT ?`,
-    [id, lim]
+    [id, corte, lim]
   );
   return rows.map((r) => ({
     id: r.id, idPlanilla: r.idPlanilla, periodo: r.periodo, fechaPago: r.fechaPago,
@@ -203,7 +230,19 @@ const deudaDetalle = async (id) => {
 //   recibidoMes     = lo que recibió en la planilla de ese mes (va a la deuda más antigua)
 //   saldo           = lo que aún se debe de ese mes
 //   tipoPago        = COMPLETO o el porcentaje pagado (ej. 50%)
+// Historia del jubilado hasta su fallecimiento (si falleció).
 const historiaCompleta = async (id) => {
+  const corte = (await mesFallecimiento(id)) || SIN_CORTE;
+  return (await historiaSinCorte(id)).filter((r) => Number(r.periodo) <= corte);
+};
+// Lo cobrado con su código después de fallecer: es la historia de su cónyuge.
+const historiaDespuesDeFallecer = async (id) => {
+  const corte = await mesFallecimiento(id);
+  if (!corte) return [];
+  return (await historiaSinCorte(id)).filter((r) => Number(r.periodo) > corte);
+};
+
+const historiaSinCorte = async (id) => {
   await assertJubilado(id);
   const [rows] = await pool.execute(
     `SELECT x.periodo,
@@ -786,6 +825,6 @@ module.exports = {
   listarFallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeudaFallecido, revertirCancelacionDeuda,
   registrarFallecidoEnServicio,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
-  resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, registrarFallecimiento,
+  resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, historiaDespuesDeFallecer, mesFallecimiento, registrarFallecimiento,
   generarEstadoCuentaPdf
 };

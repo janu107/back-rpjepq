@@ -517,15 +517,20 @@ const estadoCuenta = async (id) => {
   const edadHoy = b.fechaNacimiento ? edad(b.fechaNacimiento) : null;
   const esMenor = !esConyuge(b.parentesco) && edadHoy !== null && edadHoy < 18;
 
-  // Deuda del fallecido (la cobra la esposa).
+  // Deuda del fallecido (la cobra el cónyuge): solo los meses hasta que falleció. Lo
+  // cobrado con su código después de fallecer es del cónyuge (historia propia).
+  const jm = require("./jubiladosModulo.service");
+  const corte = (await jm.mesFallecimiento(b.idJubilado)) || 999999;
   let deudaFallecido = null;
+  let historiaConCodigo = [];
   if (esConyuge(b.parentesco)) {
+    historiaConCodigo = await jm.historiaDespuesDeFallecer(b.idJubilado);
     const [[d]] = await pool.query(
       `SELECT COALESCE(SUM(deu_monto_original), 0) AS original, COALESCE(SUM(deu_monto_pagado), 0) AS pagado,
               COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente, SUM(deu_monto_pendiente > 0) AS mesesPendientes,
               MIN(CASE WHEN deu_monto_pendiente > 0 THEN deu_periodo END) AS proximoMes,
               (SELECT deu_monto_original FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? ORDER BY deu_periodo DESC LIMIT 1) AS ultimoLiquido
-         FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ?`, [b.idJubilado, b.idJubilado]
+         FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_periodo <= ?`, [b.idJubilado, b.idJubilado, corte]
     );
     const [[c]] = await pool.query(
       `SELECT COALESCE(SUM(a.apa_monto_aplicado), 0) AS cobrado
@@ -539,7 +544,8 @@ const estadoCuenta = async (id) => {
         ORDER BY cde_correlativo DESC LIMIT 1`, [b.idJubilado]
     );
     const cuota = Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
-    deudaFallecido = {
+    if (toNum(d.original) <= 0 && !can) deudaFallecido = null;
+    else deudaFallecido = {
       canceladaFuera: can ? { fecha: can.fecha, documento: can.documento, monto: toNum(can.monto), meses: toNum(can.meses) } : null,
       total: toNum(d.original), pagado: toNum(d.pagado), pendiente: toNum(d.pendiente),
       cobradoPorBeneficiaria: toNum(c.cobrado), mesesPendientes: toNum(d.mesesPendientes), proximoMes: d.proximoMes,
@@ -587,6 +593,12 @@ const estadoCuenta = async (id) => {
     fase,
     mensual: { seLeDebe: montoMes, seLePaga: Math.round(montoMes * pctPlanilla) / 100, porcentajePlanilla: pctPlanilla },
     deudaFallecido,
+    // Meses que cobró con el código del fallecido (desde que falleció hasta que se registró).
+    historiaConCodigo: historiaConCodigo.map((h) => ({
+      periodo: h.periodo, pension: h.pensionCompleta, recibido: h.recibidoMes, debe: h.esDeuda ? h.montoGenerado : 0,
+      pagado: h.montoPagado, saldo: h.esDeuda ? h.saldo : 0, estado: h.enProceso ? "EN PROCESO" : h.esDeuda ? h.estado : "PAGADO",
+      tipo: h.tipoPago, canceladaFuera: h.canceladaFuera || null
+    })),
     resumen: {
       debe: sum(meses, "debe"), pagado: sum(meses, "pagado"), pendiente: sum(meses, "pendiente"),
       recibido: sum(pagosCerrados, "monto"), planillasCobradas: pagosCerrados.length
