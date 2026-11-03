@@ -569,6 +569,23 @@ const estadoCuenta = async (id) => {
       ORDER BY p.ppl_numero`, [id]
   );
 
+  // Orfandad: los meses que se le deben desde su inicio (nunca antes de ene-2023) y que
+  // aún no están creados (se crean al CERRAR la planilla) se muestran como pendientes.
+  const montoMesBen = b.monto !== null && b.monto !== undefined ? r2(b.monto) : Math.round(toNum(b.pension) * toNum(b.porcentaje)) / 100;
+  if (esHijo(b.parentesco) && b.estado === "ACTIVO" && (b.parentesco === "HIJO_INVALIDEZ" || esMenor) && montoMesBen > 0) {
+    const [[ini]] = await pool.query("SELECT fn_inicio_beneficios(?) AS i", [b.idJubilado]);
+    const [[ult]] = await pool.query(
+      "SELECT MAX(ppl_numero) AS n FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso IN ('GENERADA', 'CERRADA')"
+    );
+    const existentes = new Set(meses.map((m) => Number(m.periodo)));
+    for (let p = toNum(ini?.i); p && p <= toNum(ult?.n); p = p % 100 === 12 ? p + 89 : p + 1) {
+      if (!existentes.has(p)) {
+        meses.push({ periodo: p, concepto: "ORFANDAD", debe: montoMesBen, pagado: 0, pendiente: montoMesBen, estado: "SE CREA AL CERRAR", pagadoCon: null, porCrear: true });
+      }
+    }
+    meses.sort((x, y) => Number(x.periodo) - Number(y.periodo));
+  }
+
   const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + toNum(x[k]), 0) * 100) / 100;
   const pagosCerrados = pagos.filter((x) => x.estadoPlanilla === "CERRADA");
   const pension = toNum(b.pension);
@@ -610,6 +627,106 @@ const estadoCuenta = async (id) => {
     meses: meses.map((m) => ({ ...m, debe: toNum(m.debe), pagado: toNum(m.pagado), pendiente: toNum(m.pendiente) })),
     pagos: pagos.map((x) => ({ ...x, monto: toNum(x.monto) }))
   };
+};
+
+// PDF del estado de cuenta de un beneficiario (carta), con el mismo contenido de la pantalla.
+const pdfEstadoCuenta = async (id, user) => {
+  const pdf = require("../utils/pdfLayout");
+  const d = await estadoCuenta(id);
+  const b = d.beneficiario;
+  const per = (p) => { const s = String(p || ""); const M = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]; return s.length === 6 ? `${M[Number(s.slice(4, 6)) - 1]} ${s.slice(0, 4)}` : s; };
+  const Q = (v) => `Q${pdf.q(v)}`;
+  const doc = pdf.nuevoDoc(pdf.CARTA);
+  const ancho = pdf.anchoUtil(doc);
+  const x0 = doc.page.margins.left;
+  const cabecera = (dd) => pdf.encabezado(dd, {
+    titulo: "ESTADO DE CUENTA DE BENEFICIARIO", institucion: pdf.INSTITUCION_CORTA,
+    subtitulo: `${b.nombre}  ·  ${b.parentesco}  ·  ${d.fase}`
+  });
+  cabecera(doc);
+
+  // Datos en dos columnas.
+  const datos = [
+    ["Beneficiario de", `${d.fallecido.codigo} — ${d.fallecido.nombre}`], ["Fecha de fallecimiento", pdf.fecha(d.fallecido.fechaFallecimiento)],
+    ["Monto mensual (juez)", `${Q(b.monto)} (${toNum(b.porcentaje).toFixed(2)}% de ${Q(d.fallecido.pension)})`], ["Edad", b.edad !== null ? `${b.edad} años${b.esMenor ? " (menor)" : ""}` : "—"],
+    ["Se le debe por mes", Q(d.mensual.seLeDebe)], [`Se le paga por mes (${d.mensual.porcentajePlanilla}%)`, Q(d.mensual.seLePaga)],
+    ["Se deposita a", `${b.pago.aNombreDe}${b.pago.esTutora ? " (tutor)" : ""}`],
+    ["Cuenta", b.pago.formaPago === "ABONO CUENTA" ? `${b.pago.banco || ""} ${b.pago.cuenta || ""}` : (b.pago.formaPago || "Sin datos de pago")]
+  ];
+  const media = ancho / 2;
+  let y = doc.y;
+  datos.forEach(([k, v], i) => {
+    const x = x0 + (i % 2) * media;
+    if (i % 2 === 0 && i > 0) y += 22;
+    doc.font("Helvetica").fontSize(7).fillColor("#666666").text(k, x, y, { width: media - 8 });
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000").text(String(v), x, y + 8, { width: media - 8, lineBreak: false, ellipsis: true });
+  });
+  doc.y = y + 26;
+  doc.x = x0;
+
+  const titulo = (t) => {
+    if (doc.y > doc.page.height - doc.page.margins.bottom - 60) { doc.addPage(); cabecera(doc); }
+    doc.moveDown(0.6).font("Helvetica-Bold").fontSize(9.5).fillColor("#1F4E5F").text(t, x0, doc.y, { width: ancho }).fillColor("#000000");
+    doc.moveDown(0.25);
+  };
+  const tabla = (cols, filas, totales, etiqueta = "TOTALES") => {
+    const anchos = pdf.repartirAnchos(doc, cols.map((c) => c.peso));
+    const columnas = cols.map((c, i) => ({ ...c, ancho: anchos[i] }));
+    pdf.dibujarTabla(doc, columnas, filas, { fuente: 7, alturaFila: 12, altoEncabezado: 16, alRepetirEncabezado: cabecera });
+    if (totales) pdf.filaTotales(doc, columnas, totales, etiqueta, 1, { fuente: 7 });
+  };
+
+  if (d.deudaFallecido) {
+    const df = d.deudaFallecido;
+    titulo("Deuda del fallecido (la cobra el cónyuge)");
+    doc.font("Helvetica").fontSize(8).text(df.canceladaFuera
+      ? `Pagada fuera del sistema el ${pdf.fecha(df.canceladaFuera.fecha)} (${df.canceladaFuera.documento}): ${Q(df.canceladaFuera.monto)}, ${df.canceladaFuera.meses} mes(es).`
+      : `Total ${Q(df.total)} · pagado ${Q(df.pagado)} · falta ${Q(df.pendiente)} · ${df.mesesPendientes} mes(es) pendiente(s).`, x0, doc.y, { width: ancho });
+  }
+
+  if (d.historiaConCodigo?.length) {
+    const hc = d.historiaConCodigo;
+    titulo(`Cobrado con el código del fallecido (${per(hc[0].periodo)} a ${per(hc[hc.length - 1].periodo)})`);
+    const s = (k) => hc.reduce((a, x) => a + toNum(x[k]), 0);
+    tabla([
+      { titulo: "MES", valor: (f) => per(f.periodo), peso: 9 }, { titulo: "PENSIÓN", valor: (f) => pdf.q(f.pension), align: "right", peso: 10 },
+      { titulo: "RECIBIDO", campo: "recibido", valor: (f) => pdf.q(f.recibido), align: "right", peso: 10 },
+      { titulo: "SE DEBÍA", campo: "debe", valor: (f) => (f.debe > 0 ? pdf.q(f.debe) : "—"), align: "right", peso: 10 },
+      { titulo: "PAGADO DEUDA", campo: "pagado", valor: (f) => (f.debe > 0 ? pdf.q(f.pagado) : "—"), align: "right", peso: 11 },
+      { titulo: "PENDIENTE", campo: "saldo", valor: (f) => (f.debe > 0 ? pdf.q(f.saldo) : "—"), align: "right", peso: 10 },
+      { titulo: "ESTADO", valor: (f) => `${f.estado}${f.canceladaFuera ? ` (${f.canceladaFuera})` : ""}`, peso: 16 }
+    ], hc, { recibido: pdf.q(s("recibido")), debe: pdf.q(s("debe")), pagado: pdf.q(s("pagado")), saldo: pdf.q(s("saldo")) });
+  }
+
+  const nombreFase = ["ESPOSA", "ESPOSO"].includes(b.parentesco) ? "Viudez" : "Orfandad";
+  titulo(`${nombreFase}: lo que se le debe mes a mes`);
+  if (!d.meses.length) {
+    doc.font("Helvetica").fontSize(8).text("Aún no hay meses.", x0, doc.y, { width: ancho });
+  } else {
+    tabla([
+      { titulo: "MES", valor: (f) => per(f.periodo), peso: 10 }, { titulo: "CONCEPTO", campo: "concepto", peso: 16 },
+      { titulo: "SE LE DEBE", campo: "debe", valor: (f) => pdf.q(f.debe), align: "right", peso: 12 },
+      { titulo: "PAGADO", campo: "pagado", valor: (f) => pdf.q(f.pagado), align: "right", peso: 12 },
+      { titulo: "PENDIENTE", campo: "pendiente", valor: (f) => pdf.q(f.pendiente), align: "right", peso: 12 },
+      { titulo: "ESTADO", campo: "estado", peso: 16 }, { titulo: "PAGADO CON", valor: (f) => (f.pagadoCon ? String(f.pagadoCon).split(", ").map(per).join(", ") : "—"), peso: 14 }
+    ], d.meses, { debe: pdf.q(d.resumen.debe), pagado: pdf.q(d.resumen.pagado), pendiente: pdf.q(d.resumen.pendiente) });
+  }
+
+  titulo(`Pagos recibidos (total cobrado ${Q(d.resumen.recibido)} en ${d.resumen.planillasCobradas} planilla(s) cerrada(s))`);
+  if (!d.pagos.length) {
+    doc.font("Helvetica").fontSize(8).text("Todavía no aparece en ninguna planilla.", x0, doc.y, { width: ancho });
+  } else {
+    tabla([
+      { titulo: "PLANILLA", valor: (f) => per(f.planilla), peso: 12 }, { titulo: "FECHA DE PAGO", valor: (f) => pdf.fecha(f.fechaPago), peso: 14 },
+      { titulo: "CONCEPTO", campo: "concepto", peso: 26 }, { titulo: "MONTO", campo: "monto", valor: (f) => pdf.q(f.monto), align: "right", peso: 12 },
+      { titulo: "ESTADO", valor: (f) => (f.estadoPlanilla === "GENERADA" ? "EN PROCESO" : f.estadoPlanilla), peso: 12 }
+    ], d.pagos);
+  }
+
+  pdf.marcaImpresion(doc);
+  logger.info("PDF estado de cuenta de beneficiario", { id, usuario: user?.usuario });
+  const nombreArchivo = `estado_cuenta_${String(b.nombre).toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40)}.pdf`;
+  return { buffer: await pdf.aBuffer(doc), filename: nombreArchivo };
 };
 
 const registrarTutor = async (payload, currentUser) => {
@@ -697,6 +814,6 @@ const reactivar = async (id, currentUser) => {
 };
 
 module.exports = {
-  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
+  buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, pdfEstadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
   getActivos, getSuspendidos, suspender, reactivar
 };

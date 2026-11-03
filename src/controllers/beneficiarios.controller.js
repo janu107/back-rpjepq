@@ -1,6 +1,14 @@
 const service = require("../services/beneficiarios.service");
 const { successResponse } = require("../utils/response");
 
+const estadoCuentaPdf = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await service.pdfEstadoCuenta(req.params.id, req.user);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (e) { next(e); }
+};
 const buscarJubilados = async (req, res, next) => { try { return successResponse(res, await service.buscarJubilados(req.query.q), "Jubilados encontrados"); } catch (e) { next(e); } };
 const getByJubilado = async (req, res, next) => { try { return successResponse(res, await service.getByJubilado(req.params.id), "Beneficiarios del jubilado obtenidos"); } catch (e) { next(e); } };
 const registrarLote = async (req, res, next) => { try { return successResponse(res, await service.registrarLote(req.body, req.user), "Beneficiarios guardados correctamente", 201); } catch (e) { next(e); } };
@@ -17,7 +25,7 @@ const actualizarPorcentajes = async (req, res, next) => { try { return successRe
 
 const estadoCuenta = async (req, res, next) => { try { return successResponse(res, await service.estadoCuenta(req.params.id), "Estado de cuenta del beneficiario"); } catch (e) { next(e); } };
 
-module.exports = { estadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
+module.exports = { estadoCuenta, estadoCuentaPdf, actualizar, actualizarPorcentajes, actualizarMontos,
   buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor,
   getActivos, getSuspendidos, suspender, reactivar
 };

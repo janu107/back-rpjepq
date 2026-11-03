@@ -17,6 +17,7 @@ router.get("/activos", ADMIN_OP, controller.getActivos);
 router.get("/suspendidos", ADMIN_OP, controller.getSuspendidos);
 router.get("/jubilado/:id", ADMIN_OP, controller.getByJubilado);
 router.get("/:id/estado-cuenta", ADMIN_OP, controller.estadoCuenta);
+router.get("/:id/estado-cuenta/pdf", ADMIN_OP, controller.estadoCuentaPdf);
 
 // --- Escritura ---
 router.post("/registrar", ADMIN_OP, auditAction("BENEFICIARIOS", "REGISTRAR", (req) => `Registro de beneficiarios jubilado ${req.body?.idJubilado}`), controller.registrarLote);
