@@ -11,4 +11,5 @@ SELECT
 FROM RPJ_MNT_DETALLE_APORTACION_EPQ d
 INNER JOIN RPJ_MNT_APORTACION_EPQ a ON a.apo_correlativo = d.dap_id_aportacion
 WHERE d.dap_id_aportacion = ?
-ORDER BY d.dap_correlativo ASC;
+-- De la fecha de pago más reciente a la más antigua.
+ORDER BY d.dap_fecha_pago DESC, d.dap_correlativo DESC;
