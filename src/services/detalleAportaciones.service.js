@@ -161,16 +161,8 @@ const bulkUpload = async (buffer, currentUser) => {
   const createdBy = currentUser?.usuario || "sistema";
   const summary = { totalFilas: 0, insertados: 0, omitidos: 0, errores: [] };
 
-  // Cache de aportaciones por apo_id para evitar consultas repetidas.
-  const aportacionCache = new Map();
-  const findAportacion = async (apoId) => {
-    if (aportacionCache.has(apoId)) return aportacionCache.get(apoId);
-    const [rows] = await pool.execute(getSql("aportaciones/buscarPorIdAportacion.sql"), [apoId]);
-    const correlativo = rows[0] ? Number(rows[0].apo_correlativo) : null;
-    aportacionCache.set(apoId, correlativo);
-    return correlativo;
-  };
-
+  // 1) Leer y validar todas las filas.
+  const filas = [];
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
     const row = worksheet.getRow(rowNumber);
     const rawId = cellToValue(row.getCell(columnIndex.idEmpleado).value);
@@ -183,30 +175,71 @@ const bulkUpload = async (buffer, currentUser) => {
     summary.totalFilas += 1;
     const idEmpleado = String(rawId ?? "").trim();
     const fecha = toDateString(rawFecha);
-    const monto = Number(rawMonto);
+    const monto = Math.round(Number(rawMonto) * 100) / 100;
 
     if (!idEmpleado) { summary.errores.push({ fila: rowNumber, error: "ID empleado es obligatorio" }); continue; }
     if (!fecha) { summary.errores.push({ fila: rowNumber, error: "Fecha invalida" }); continue; }
     if (!(monto > 0)) { summary.errores.push({ fila: rowNumber, error: "Monto debe ser numerico y mayor a 0" }); continue; }
+    filas.push({ rowNumber, idEmpleado, fecha, monto });
+  }
 
-    try {
-      const aportacionCorrelativo = await findAportacion(idEmpleado);
-      if (!aportacionCorrelativo) {
-        summary.errores.push({ fila: rowNumber, error: `No existe aportacion con ID ${idEmpleado}` });
-        continue;
+  if (filas.length) {
+    // 2) Empleados EPQ de todo el archivo en una sola consulta (apo_id -> apo_correlativo).
+    const ids = [...new Set(filas.map((f) => f.idEmpleado))];
+    const correlativo = new Map();
+    for (let k = 0; k < ids.length; k += 1000) {
+      const [rows] = await pool.query("SELECT apo_correlativo, apo_id FROM RPJ_MNT_APORTACION_EPQ WHERE apo_id IN (?)", [ids.slice(k, k + 1000)]);
+      rows.forEach((r) => correlativo.set(String(r.apo_id), Number(r.apo_correlativo)));
+    }
+
+    // 3) Aportes que ya existen (mismo empleado y misma fecha) en el rango de fechas del archivo.
+    const correlativos = [...new Set([...correlativo.values()])];
+    const fechas = filas.map((f) => f.fecha).sort();
+    const existentes = new Set();
+    for (let k = 0; k < correlativos.length; k += 1000) {
+      const [rows] = await pool.query(
+        `SELECT dap_id_aportacion AS id, DATE_FORMAT(dap_fecha_pago, '%Y-%m-%d') AS fecha
+           FROM RPJ_MNT_DETALLE_APORTACION_EPQ
+          WHERE dap_id_aportacion IN (?) AND dap_fecha_pago BETWEEN ? AND ?`,
+        [correlativos.slice(k, k + 1000), fechas[0], fechas[fechas.length - 1]]
+      );
+      rows.forEach((r) => existentes.add(`${r.id}|${r.fecha}`));
+    }
+
+    // 4) Lo nuevo (un repetido dentro del mismo archivo también se omite).
+    const nuevos = [];
+    filas.forEach((f) => {
+      const id = correlativo.get(f.idEmpleado);
+      if (!id) { summary.errores.push({ fila: f.rowNumber, error: `No existe aportacion con ID ${f.idEmpleado}` }); return; }
+      const clave = `${id}|${f.fecha}`;
+      if (existentes.has(clave)) { summary.omitidos += 1; return; }
+      existentes.add(clave);
+      nuevos.push([id, f.fecha, f.monto, createdBy]);
+    });
+
+    // 5) Guardar de 1,000 en 1,000 en una sola transacción: o entra todo o nada.
+    if (nuevos.length) {
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        for (let k = 0; k < nuevos.length; k += 1000) {
+          await conn.query(
+            "INSERT INTO RPJ_MNT_DETALLE_APORTACION_EPQ (dap_id_aportacion, dap_fecha_pago, dap_valor, dap_usuario_creacion) VALUES ?",
+            [nuevos.slice(k, k + 1000)]
+          );
+        }
+        await conn.commit();
+        summary.insertados = nuevos.length;
+      } catch (error) {
+        await conn.rollback();
+        logger.error("Carga masiva de aportaciones: no se guardó nada", { message: error.message, code: error.code });
+        throw createError("No se pudo guardar la carga; no se agregó ningún registro. Intente de nuevo.", 500);
+      } finally {
+        conn.release();
       }
-
-      // No actualizar: si ya existe detalle para misma aportacion y misma fecha, se omite.
-      const [existing] = await pool.execute(getSql("aportaciones/detalle/buscarPorAportacionYFecha.sql"), [aportacionCorrelativo, fecha]);
-      if (existing.length > 0) { summary.omitidos += 1; continue; }
-
-      await pool.execute(getSql("aportaciones/detalle/crearDetalle.sql"), [aportacionCorrelativo, fecha, monto, createdBy]);
-      summary.insertados += 1;
-    } catch (error) {
-      logger.error("Error en fila de carga masiva", { fila: rowNumber, message: error.message, code: error.code });
-      summary.errores.push({ fila: rowNumber, error: "No se pudo procesar la fila" });
     }
   }
+  summary.errores.sort((a, b) => a.fila - b.fila);
 
   logger.info("Carga masiva de aportaciones procesada", {
     totalFilas: summary.totalFilas,
