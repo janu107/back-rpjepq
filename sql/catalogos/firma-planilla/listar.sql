@@ -10,4 +10,4 @@ SELECT
   m.man_descripcion AS manejo_descripcion
 FROM RPJ_CAT_FIRMA_PLANILLA f
 LEFT JOIN RPJ_CAT_MANEJO_ADMINISTRACION m ON m.man_id = f.fpl_tipo_manejo
-ORDER BY f.fpl_correlativo ASC;
+ORDER BY f.fpl_tipo_manejo, f.fpl_id, f.fpl_correlativo;

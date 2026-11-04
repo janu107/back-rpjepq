@@ -1,5 +1,8 @@
 const logger = require("../config/logger");
 const { pool } = require("../config/db");
+
+// Tipos de firma de los reportes, en el orden en que se imprimen.
+const TIPOS_FIRMA = ["ELABORADO POR", "REVISADO POR", "VISTO BUENO", "AUTORIZADO POR"];
 const getSql = require("../utils/sqlLoader");
 const { upperCaseFields } = require("../utils/text");
 
@@ -113,11 +116,29 @@ const catalogs = {
       usuarioCreacion: row.par_usuario_creacion
     })
   },
+  // Firmas de los reportes: a quién aplican (manejo), tipo de firma, nombre y puesto.
+  // El orden (fpl_id) es opcional: por defecto el del tipo de firma.
   "firma-planilla": {
     dir: "firma-planilla",
-    required: ["tipoManejo", "idFirma", "nombre", "puesto", "tipo"],
+    required: ["tipoManejo", "nombre", "puesto", "tipo"],
     upperFields: ["nombre", "puesto", "tipo"],
-    toDb: (data) => [data.tipoManejo, data.idFirma, data.nombre, data.puesto, data.tipo],
+    validate: (data) => {
+      if (!TIPOS_FIRMA.includes(String(data.tipo || "").toUpperCase())) {
+        const error = new Error(`Tipo de firma no válido: use ${TIPOS_FIRMA.join(", ")}`);
+        error.status = 400;
+        throw error;
+      }
+      if (data.idFirma !== undefined && data.idFirma !== null && String(data.idFirma).trim() !== "" && !(Number(data.idFirma) > 0)) {
+        const error = new Error("El orden debe ser un número mayor a cero");
+        error.status = 400;
+        throw error;
+      }
+    },
+    toDb: (data) => [
+      data.tipoManejo,
+      Number(data.idFirma) > 0 ? Math.trunc(Number(data.idFirma)) : TIPOS_FIRMA.indexOf(String(data.tipo).toUpperCase()) + 1,
+      data.nombre, data.puesto, String(data.tipo).toUpperCase()
+    ],
     toResponse: (row) => ({
       id: row.fpl_correlativo,
       tipoManejo: row.fpl_tipo_manejo,
@@ -265,4 +286,4 @@ const remove = async (catalogKey, id, currentUser) => {
   }
 };
 
-module.exports = { list, getById, create, update, remove };
+module.exports = { list, getById, create, update, remove, TIPOS_FIRMA };
