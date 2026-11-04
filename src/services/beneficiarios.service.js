@@ -530,8 +530,8 @@ const estadoCuenta = async (id) => {
               COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente, SUM(deu_monto_pendiente > 0) AS mesesPendientes,
               MIN(CASE WHEN deu_monto_pendiente > 0 THEN deu_periodo END) AS proximoMes,
               (SELECT deu_monto_original FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ?
-                ORDER BY (COALESCE(deu_observaciones, '') LIKE '%Proporcional por fallecimiento%'), deu_periodo DESC LIMIT 1) AS ultimoLiquido
-         FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND deu_periodo <= ?`, [b.idJubilado, b.idJubilado, corte]
+                ORDER BY (MOD(deu_periodo, 100) > 12), (COALESCE(deu_observaciones, '') LIKE '%Proporcional por fallecimiento%'), deu_periodo DESC LIMIT 1) AS ultimoLiquido
+         FROM RPJ_PRC_DEUDA_JUBILADO WHERE deu_id_jubilado = ? AND (deu_periodo <= ? OR MOD(deu_periodo, 100) > 12)`, [b.idJubilado, b.idJubilado, corte]
     );
     const [[c]] = await pool.query(
       `SELECT COALESCE(SUM(a.apa_monto_aplicado), 0) AS cobrado
@@ -544,13 +544,17 @@ const estadoCuenta = async (id) => {
          FROM RPJ_PRC_CANCELACION_DEUDA WHERE cde_id_jubilado = ? AND cde_estado = 'VIGENTE' AND cde_tipo = 'TOTAL'
         ORDER BY cde_correlativo DESC LIMIT 1`, [b.idJubilado]
     );
-    const cuota = Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
+    const conv = await jm.convenioVigente(id);
+    const cuota = conv ? conv.cuota : Math.round(toNum(d.ultimoLiquido) * pctPlanilla) / 100;
     if (toNum(d.original) <= 0 && !can) deudaFallecido = null;
     else deudaFallecido = {
       canceladaFuera: can ? { fecha: can.fecha, documento: can.documento, monto: toNum(can.monto), meses: toNum(can.meses) } : null,
       total: toNum(d.original), pagado: toNum(d.pagado), pendiente: toNum(d.pendiente),
       cobradoPorBeneficiaria: toNum(c.cobrado), mesesPendientes: toNum(d.mesesPendientes), proximoMes: d.proximoMes,
-      cuotaMensual: cuota, mesesParaTerminar: cuota > 0 ? Math.ceil(toNum(d.pendiente) / cuota) : null
+      cuotaMensual: cuota, mesesParaTerminar: cuota > 0 ? Math.ceil(toNum(d.pendiente) / cuota) : null,
+      formaCobro: conv
+        ? { modo: "CONVENIO", documento: conv.documento, autorizadoPor: conv.autorizadoPor, fechaInicio: conv.fechaInicio, cuota: conv.cuota }
+        : { modo: "PORCENTAJE", porcentaje: pctPlanilla }
     };
   }
 
@@ -635,7 +639,7 @@ const pdfEstadoCuenta = async (id, user) => {
   const pdf = require("../utils/pdfLayout");
   const d = await estadoCuenta(id);
   const b = d.beneficiario;
-  const per = (p) => { const s = String(p || ""); const M = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]; return s.length === 6 ? `${M[Number(s.slice(4, 6)) - 1]} ${s.slice(0, 4)}` : s; };
+  const per = (p) => { const s = String(p || ""); const M = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]; return require("./jubiladosModulo.service").nombrePrestacion(s) || (s.length === 6 ? `${M[Number(s.slice(4, 6)) - 1]} ${s.slice(0, 4)}` : s); };
   const Q = (v) => `Q${pdf.q(v)}`;
   const doc = pdf.nuevoDoc(pdf.CARTA);
   const ancho = pdf.anchoUtil(doc);

@@ -34,7 +34,8 @@ FROM (
   SELECT COUNT(*) AS total, COALESCE(SUM(ROUND(x.pension * x.dias / 365 * ? / 100 * x.ben_pct / 100, 2)), 0) AS estimado
     FROM (
       SELECT s.sal_salario AS pension, b.ben_porcentaje AS ben_pct,
-             LEAST(365, GREATEST(0, DATEDIFF(?, GREATEST(?, COALESCE(j.jub_fecha_jubilacion, ?))) + 1)) AS dias
+             -- Desde el día siguiente al fallecimiento (lo anterior va en la deuda del fallecido).
+             LEAST(365, GREATEST(0, DATEDIFF(?, GREATEST(?, COALESCE(j.jub_fecha_jubilacion, ?), COALESCE(j.jub_fecha_fallecimiento + INTERVAL 1 DAY, '1900-01-01'))) + 1)) AS dias
         FROM RPJ_MNT_BENEFICIARIO b
         INNER JOIN RPJ_MNT_JUBILADO j ON j.jub_correlativo = b.ben_id_jubilado AND j.jub_tipo_manejo = 2 AND j.jub_estado_pago = 'FALLECIDO'
         INNER JOIN RPJ_MNT_SALARIO s ON s.sal_id_jubilado = j.jub_correlativo AND s.sal_tipo_manejo = 2 AND s.sal_tipo_ingreso = 1
