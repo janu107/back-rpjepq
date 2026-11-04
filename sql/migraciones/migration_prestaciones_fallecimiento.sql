@@ -2,8 +2,7 @@
 -- Aguinaldo y bono 14 del fallecido (2026-11-03).
 --  * Al registrar el fallecimiento, el sistema agrega a la deuda del fallecido
 --    (la cobra el cónyuge) su aguinaldo y bono 14 al 100%:
---      proporcional del período en curso (días hasta la fecha de fallecimiento)
---      y completo el período ya cerrado que todavía no se le pagó.
+--      proporcional del período en curso (días hasta la fecha de fallecimiento).
 --    Van en la deuda con período especial: AAAA13 = AGUINALDO del año AAAA,
 --    AAAA14 = BONO 14 del año AAAA (se cobran después de los meses de pensión).
 --  * La cuota mensual del cónyuge (su último líquido) ignora esos renglones.

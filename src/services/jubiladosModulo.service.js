@@ -530,11 +530,10 @@ const aplicarAjusteFallecimiento = async (conn, idJubilado, fecha, usuario) => {
 
 // ---------------------------------------------------------------------------
 // Aguinaldo y bono 14 del fallecido (al 100%, se suman a la deuda que cobra el
-// cónyuge). Por cada prestación:
-//   * el período en curso al fallecer: proporcional, días vividos / 365;
-//   * el período anterior, si ya terminó y no se le pagó en una planilla del
-//     sistema: completo.
-// Solo períodos que terminan desde PRESTACIONES_DESDE (antes se pagaban fuera).
+// cónyuge). Por cada prestación, solo el período en curso al fallecer:
+// proporcional, días vividos / 365 (contando el día del fallecimiento). Los
+// períodos ya terminados se pagaron en su momento (dentro o fuera del sistema).
+// Solo períodos que terminan desde PRESTACIONES_DESDE.
 // Período de aguinaldo: 1-dic al 30-nov; bono 14: 1-jul al 30-jun.
 // ---------------------------------------------------------------------------
 const PRESTACIONES_DESDE = "2026-06-30";
@@ -567,7 +566,7 @@ const calcularPrestacionesFallecimiento = async (conn, idJubilado, fecha) => {
   const filas = [];
   for (const t of TIPOS_PRESTACION) {
     const anioActual = m >= t.mesInicio ? y + 1 : y;
-    for (const anio of [anioActual - 1, anioActual]) {
+    for (const anio of [anioActual]) {
       const per = periodoDePrestacion(t, anio);
       if (per.fin < PRESTACIONES_DESDE) continue;
       const completo = per.fin < f;
