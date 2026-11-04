@@ -51,9 +51,13 @@ const depositosPdf = async (req, res, next) => { try { return enviarPdf(res, awa
 const excelNominaSueldos = async (req, res, next) => { try { return enviarArchivo(res, await service.excelNominaSueldos(req.params.idPlanilla, req.query), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
 const oficiosPreview = async (req, res, next) => { try { return successResponse(res, await depositos.previewOficios(req.params.idPlanilla, req.query), "Oficios al banco"); } catch (e) { next(e); } };
 const oficiosPdf = async (req, res, next) => { try { return enviarPdf(res, await depositos.pdfOficios(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
+const previewDeudaFallecidos = async (req, res, next) => { try { return successResponse(res, await service.getNominaDeudaFallecidos(req.params.idPlanilla), "Nómina de deuda de fallecidos"); } catch (e) { next(e); } };
+const pdfDeudaFallecidos = async (req, res, next) => { try { return enviarPdf(res, await service.pdfNominaDeudaFallecidos(req.params.idPlanilla, req.query, req.user)); } catch (e) { next(e); } };
+const excelDeudaFallecidos = async (req, res, next) => { try { return enviarArchivo(res, await service.excelNominaDeudaFallecidos(req.params.idPlanilla), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
 const depositosExcel = async (req, res, next) => { try { return enviarArchivo(res, await depositos.excelDepositos(req.params.idPlanilla, req.query), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) { next(e); } };
 
 module.exports = {
+  previewDeudaFallecidos, pdfDeudaFallecidos, excelDeudaFallecidos,
   depositosPlanillas, depositosPreview, depositosPdf, depositosExcel, excelNominaSueldos, oficiosPreview, oficiosPdf,
   opciones,
   previewNominaSueldos, previewNominaTiempoExtra, previewEstadoCuenta, previewResumen, previewNominaPrestamos,

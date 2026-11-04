@@ -1,7 +1,7 @@
 -- Nómina de jubilados de una planilla, para impresión en oficio.
 --
 -- Primero el pago propio de cada jubilado; después (UNION) los beneficiarios de
--- jubilados fallecidos, agrupados como VIUDEZ (DEUDA) -cobra la deuda del fallecido-, VIUDEZ,
+-- jubilados fallecidos, agrupados como VIUDEZ (la deuda del fallecido que cobra el cónyuge va en nominaDeudaFallecidos),
 -- ORFANDAD u ORFANDAD (LIQ.) -pago único al cumplir 18-. A los menores se les paga a la tutora (va en el nombre).
 --
 -- Ingresos y descuentos se agregan por separado para no multiplicar renglones.
@@ -81,7 +81,7 @@ SELECT
          IF(tut.tut_correlativo IS NOT NULL AND TIMESTAMPDIFF(YEAR, b.ben_fecha_nacimiento, pla.ppl_fecha_inicio) < 18,
             CONCAT(' (TUTOR: ', TRIM(CONCAT(COALESCE(tut.tut_nombres, ''), ' ', tut.tut_apellidos)), ')'), '')),
   CASE i.nin_puesto
-    WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'VIUDEZ (DEUDA)'
+    WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'VIUDEZ'
     WHEN 'LIQUIDACION ORFANDAD' THEN 'ORFANDAD (LIQ.)'
     ELSE i.nin_puesto
   END,
@@ -121,5 +121,6 @@ LEFT JOIN RPJ_MNT_TUTOR tut ON tut.tut_correlativo = (
   SELECT t2.tut_correlativo FROM RPJ_MNT_TUTOR t2
    WHERE t2.tut_id_beneficiario = b.ben_correlativo AND t2.tut_estado = 'VIGENTE'
    ORDER BY t2.tut_correlativo DESC LIMIT 1)
-WHERE i.nin_id_planilla = ? AND i.nin_id_beneficiario IS NOT NULL
+-- Lo que el cónyuge cobra de la deuda del fallecido va en la nómina de deuda de fallecidos.
+WHERE i.nin_id_planilla = ? AND i.nin_id_beneficiario IS NOT NULL AND i.nin_puesto <> 'COBRO DEUDA DEL FALLECIDO'
 ORDER BY tipo_jubilacion, nombre;

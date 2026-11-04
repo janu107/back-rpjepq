@@ -949,8 +949,8 @@ const pdfNominaPrestamos = async (query, user) => {
 // seguro (existe la bandera dat_aplica_seguro en datos de planilla, pero ningún
 // SP genera ese renglón). Mientras no exista el tipo, la columna saldría en cero.
 // ---------------------------------------------------------------------------
-// "VIUDEZ" incluye a "VIUDEZ (DEUDA)" (la esposa que cobra la deuda del
-// fallecido) y "ORFANDAD" a "ORFANDAD (LIQ.)".
+// La esposa siempre va como "VIUDEZ" (aunque su pago abone a la deuda del
+// fallecido); "ORFANDAD" incluye a "ORFANDAD (LIQ.)".
 const mismoTipo = (valor, tipo) => {
   const v = String(valor || "").toUpperCase();
   return v === tipo || v.startsWith(`${tipo} (`);
@@ -1297,7 +1297,142 @@ const excelNominaJubilados = async (idPlanilla, opciones = {}) => {
   return { buffer: await wb.xlsx.writeBuffer(), filename: `nomina_jubilados_${planilla.numero}.xlsx` };
 };
 
+// ---------------------------------------------------------------------------
+// Nómina de deuda de fallecidos (misma planilla de jubilados): lo que cada
+// cónyuge cobra para abonar a la deuda del jubilado fallecido. Saldo antes y
+// después del pago, y los meses a los que se abona (si la planilla está
+// cerrada, los abonos registrados; si no, los que se abonarán).
+// ---------------------------------------------------------------------------
+const mes3 = (p) => { const s = String(p || ""); const m = Number(s.slice(4, 6)); return m === 13 ? `AGUINALDO ${s.slice(0, 4)}` : m === 14 ? `BONO 14 ${s.slice(0, 4)}` : `${MES3[m - 1] || ""} ${s.slice(0, 4)}`; };
+const resumirMeses = (lista) => {
+  if (!lista.length) return "";
+  if (lista.length <= 2) return lista.map(mes3).join(", ");
+  return `${mes3(lista[0])} a ${mes3(lista[lista.length - 1])} (${lista.length})`;
+};
+
+const getNominaDeudaFallecidos = async (idPlanilla) => {
+  const planilla = await getPlanilla(idPlanilla);
+  const [rows] = await pool.execute(sql("nominaDeudaFallecidos"), [idPlanilla]);
+  const cerrada = planilla.estadoProceso === "CERRADA";
+  const filas = [];
+  for (const r of rows) {
+    const monto = num(r.monto);
+    const [[pend]] = await pool.query(
+      `SELECT COALESCE(SUM(deu_monto_pendiente), 0) AS pendiente FROM RPJ_PRC_DEUDA_JUBILADO
+        WHERE deu_id_jubilado = ? AND deu_estado IN ('PENDIENTE','PARCIAL')`, [r.id_jubilado]
+    );
+    let antes; let meses;
+    if (cerrada) {
+      // Lo abonado por esta planilla y las posteriores se suma para saber el saldo que tenía antes.
+      const [[ab]] = await pool.query(
+        `SELECT COALESCE(SUM(a.apa_monto_aplicado), 0) AS total
+           FROM RPJ_PRC_APLICACION_PAGO a JOIN RPJ_CAT_PARAMETRO_PLANILLA p ON p.ppl_correlativo = a.apa_id_planilla
+          WHERE a.apa_id_jubilado = ? AND a.apa_observaciones LIKE ? AND p.ppl_numero >= ? AND p.ppl_estado_proceso = 'CERRADA'`,
+        [r.id_jubilado, `Beneficiario ${r.id_beneficiario}:%`, planilla.numero]
+      );
+      antes = num(pend.pendiente) + num(ab.total);
+      const [ms] = await pool.query(
+        `SELECT DISTINCT apa_periodo_deuda AS p FROM RPJ_PRC_APLICACION_PAGO
+          WHERE apa_id_planilla = ? AND apa_id_jubilado = ? AND apa_observaciones LIKE ? ORDER BY apa_periodo_deuda`,
+        [idPlanilla, r.id_jubilado, `Beneficiario ${r.id_beneficiario}:%`]
+      );
+      meses = ms.map((m) => m.p);
+    } else {
+      antes = num(pend.pendiente);
+      // Del mes más viejo al más nuevo, como se abonará al cerrar.
+      const [ds] = await pool.query(
+        `SELECT deu_periodo AS p, deu_monto_pendiente AS pe FROM RPJ_PRC_DEUDA_JUBILADO
+          WHERE deu_id_jubilado = ? AND deu_estado IN ('PENDIENTE','PARCIAL') AND deu_monto_pendiente > 0 ORDER BY deu_periodo`, [r.id_jubilado]
+      );
+      meses = []; let resto = monto;
+      for (const d of ds) { if (resto <= 0) break; meses.push(d.p); resto -= num(d.pe); }
+    }
+    filas.push({
+      codigo: r.codigo, nombre_fallecido: r.nombre_fallecido, fecha_fallecimiento: r.fecha_fallecimiento,
+      nombre_conyuge: r.nombre_conyuge, parentesco: r.parentesco,
+      forma_cobro: r.convenio_documento ? `CONVENIO (${r.convenio_documento})` : `PORCENTAJE ${num(r.porcentaje)}%`,
+      saldo_antes: Math.round(antes * 100) / 100, monto, saldo_despues: Math.max(Math.round((antes - monto) * 100) / 100, 0),
+      meses: resumirMeses(meses),
+      cuenta: r.forma_pago === "ABONO CUENTA" ? `${r.banco || ""} ${r.cuenta || ""}`.trim() : (r.forma_pago || "SIN DATOS")
+    });
+  }
+  return { planilla, filas };
+};
+
+const COLS_DEUDA = (doc) => {
+  const anchos = pdf.repartirAnchos(doc, [5, 20, 8, 20, 12, 10, 10, 10, 15, 14]);
+  const c = (titulo, campo, align, i, valor) => ({ titulo, campo, align, ancho: anchos[i], valor });
+  return [
+    c("COD", "codigo", "right", 0),
+    c("JUBILADO FALLECIDO", "nombre_fallecido", "left", 1),
+    c("FALLECIÓ", "fecha_fallecimiento", "center", 2, (f) => fecha(f.fecha_fallecimiento)),
+    c("CÓNYUGE (COBRA)", "nombre_conyuge", "left", 3),
+    c("FORMA DE COBRO", "forma_cobro", "left", 4),
+    c("SALDO ANTERIOR", "saldo_antes", "right", 5, (f) => q(f.saldo_antes)),
+    c("PAGO DEL MES", "monto", "right", 6, (f) => q(f.monto)),
+    c("SALDO", "saldo_despues", "right", 7, (f) => q(f.saldo_despues)),
+    c("MESES QUE SE ABONAN", "meses", "center", 8),
+    c("CUENTA", "cuenta", "left", 9)
+  ];
+};
+
+const pdfNominaDeudaFallecidos = async (idPlanilla, opciones = {}, user) => {
+  const { planilla, filas } = await getNominaDeudaFallecidos(idPlanilla);
+  if (!filas.length) throw createError("La planilla no tiene pagos de deuda de fallecidos", 409);
+  const firmas = parsearFirmas(opciones.firmas);
+  const doc = pdf.nuevoDoc(pdf.OFICIO);
+  const columnas = COLS_DEUDA(doc);
+  const cabecera = (d) => pdf.encabezado(d, {
+    titulo: "NOMINA DE DEUDA DE JUBILADOS FALLECIDOS",
+    subtitulo: `Planilla ${planilla.numero}   ·   Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}   ·   Pago ${fecha(planilla.fechaPago)}`,
+    lineas: ["Pago al cónyuge de la deuda que se le debía al jubilado fallecido"]
+  });
+  cabecera(doc);
+  pdf.dibujarTabla(doc, columnas, filas, { fuente: LETRA_JUB, alturaFila: 13, altoEncabezado: 22, reservaInferior: 70, alRepetirEncabezado: cabecera });
+  pdf.filaTotales(doc, columnas, { saldo_antes: q(sumar(filas, "saldo_antes")), monto: q(sumar(filas, "monto")), saldo_despues: q(sumar(filas, "saldo_despues")) }, "TOTAL", 4, { fuente: LETRA_JUB });
+  cierreNomina(doc, { total: sumar(filas, "monto"), fechaPago: planilla.fechaPago, firmas });
+  pdf.pieDePagina(doc, user?.usuario);
+  logger.info("Impresión de nómina de deuda de fallecidos", { idPlanilla, filas: filas.length, usuario: user?.usuario });
+  return { buffer: await pdf.aBuffer(doc), filename: `nomina_deuda_fallecidos_${planilla.numero}.pdf` };
+};
+
+const excelNominaDeudaFallecidos = async (idPlanilla) => {
+  const ExcelJS = require("exceljs");
+  const { planilla, filas } = await getNominaDeudaFallecidos(idPlanilla);
+  if (!filas.length) throw createError("La planilla no tiene pagos de deuda de fallecidos", 409);
+  const columnas = [
+    { t: "COD", c: "codigo", w: 8 }, { t: "JUBILADO FALLECIDO", c: "nombre_fallecido", w: 34 }, { t: "FALLECIÓ", c: "fecha_fallecimiento", w: 12, f: true },
+    { t: "CÓNYUGE (COBRA)", c: "nombre_conyuge", w: 34 }, { t: "FORMA DE COBRO", c: "forma_cobro", w: 24 },
+    { t: "SALDO ANTERIOR", c: "saldo_antes", w: 15, m: true }, { t: "PAGO DEL MES", c: "monto", w: 14, m: true }, { t: "SALDO", c: "saldo_despues", w: 15, m: true },
+    { t: "MESES QUE SE ABONAN", c: "meses", w: 30 }, { t: "CUENTA", c: "cuenta", w: 26 }
+  ];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Deuda fallecidos", { pageSetup: { paperSize: 5, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  columnas.forEach((x, k) => { ws.getColumn(k + 1).width = x.w; });
+  const titulo = (texto, tam, negrita = true) => { const r = ws.addRow([texto]); ws.mergeCells(r.number, 1, r.number, columnas.length); r.getCell(1).font = { bold: negrita, size: tam }; r.getCell(1).alignment = { horizontal: "center" }; };
+  titulo("REGIMEN DE PENSIONES Y JUBILACIONES DE LA EMPRESA PORTUARIA QUETZAL", 12);
+  titulo("NOMINA DE DEUDA DE JUBILADOS FALLECIDOS", 11);
+  titulo(`Planilla ${planilla.numero}  ·  Período ${fecha(planilla.fechaInicio)} al ${fecha(planilla.fechaFinal)}  ·  Pago ${fecha(planilla.fechaPago)}`, 9, false);
+  ws.addRow([]);
+  const h = ws.addRow(columnas.map((x) => x.t));
+  h.eachCell((cell) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E5F" } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
+  h.height = 28;
+  filas.forEach((f) => {
+    const r = ws.addRow(columnas.map((x) => (x.f ? (f[x.c] ? fecha(f[x.c]) : "") : x.m ? Number(f[x.c] || 0) : f[x.c])));
+    r.font = { size: 9 };
+    columnas.forEach((x, k) => { if (x.m) r.getCell(k + 1).numFmt = "#,##0.00"; });
+  });
+  const tot = ws.addRow(columnas.map((x, k) => (k === 0 ? "TOTAL" : x.m ? sumar(filas, x.c) : null)));
+  tot.font = { bold: true, size: 9 };
+  columnas.forEach((x, k) => { if (x.m) tot.getCell(k + 1).numFmt = "#,##0.00"; });
+  ws.addRow([]);
+  const letras = ws.addRow([`LA PRESENTE PLANILLA ASCIENDE A LA CANTIDAD DE ${numeroALetras(sumar(filas, "monto"))}`]);
+  ws.mergeCells(letras.number, 1, letras.number, columnas.length);
+  return { buffer: await wb.xlsx.writeBuffer(), filename: `nomina_deuda_fallecidos_${planilla.numero}.xlsx` };
+};
+
 module.exports = {
+  getNominaDeudaFallecidos, pdfNominaDeudaFallecidos, excelNominaDeudaFallecidos,
   getOpciones,
   getNominaJubilados,
   pdfNominaJubilados,

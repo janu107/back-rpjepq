@@ -1,6 +1,6 @@
 -- Resumen de nómina de jubilados, bloque PENSIONES: nominal y líquido por tipo
 -- de jubilación, para una planilla. Incluye a los beneficiarios de fallecidos
--- con los mismos grupos de la nómina impresa (VIUDEZ (DEUDA), VIUDEZ, ORFANDAD,
+-- con los mismos grupos de la nómina impresa (VIUDEZ, ORFANDAD, DEUDA DE FALLECIDOS,
 -- ORFANDAD (LIQ.)). Params: [idPlanilla, idPlanilla, idPlanilla].
 SELECT tipo_jubilacion, COUNT(*) AS cantidad, SUM(nominal) AS nominal, SUM(liquido) AS liquido
 FROM (
@@ -30,7 +30,7 @@ FROM (
   UNION ALL
 
   SELECT CASE i.nin_puesto
-           WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'VIUDEZ (DEUDA)'
+           WHEN 'COBRO DEUDA DEL FALLECIDO' THEN 'DEUDA DE FALLECIDOS'
            WHEN 'LIQUIDACION ORFANDAD' THEN 'ORFANDAD (LIQ.)'
            ELSE i.nin_puesto
          END,

@@ -68,6 +68,14 @@ router.get("/nomina-jubilados/:idPlanilla/pdf",
   auditAction("IMPRESIONES", "NOMINA_JUBILADOS_PDF", (req) => `Imprimir nómina de jubilados de la planilla ${req.params.idPlanilla}`),
   controller.pdfNominaJubilados);
 
+router.get("/deuda-fallecidos/:idPlanilla", controller.previewDeudaFallecidos);
+router.get("/deuda-fallecidos/:idPlanilla/pdf",
+  auditAction("IMPRESIONES", "NOMINA_DEUDA_FALLECIDOS_PDF", (req) => `Imprimir nómina de deuda de fallecidos de la planilla ${req.params.idPlanilla}`),
+  controller.pdfDeudaFallecidos);
+router.get("/deuda-fallecidos/:idPlanilla/excel",
+  auditAction("IMPRESIONES", "NOMINA_DEUDA_FALLECIDOS_EXCEL", (req) => `Exportar nómina de deuda de fallecidos de la planilla ${req.params.idPlanilla}`),
+  controller.excelDeudaFallecidos);
+
 router.get("/resumen-jubilados/:idPlanilla/pdf",
   auditAction("IMPRESIONES", "RESUMEN_JUBILADOS_PDF", (req) => `Imprimir resumen de nómina de jubilados de la planilla ${req.params.idPlanilla}`),
   controller.pdfResumenJubilados);
