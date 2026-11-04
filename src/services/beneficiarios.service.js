@@ -591,6 +591,31 @@ const estadoCuenta = async (id) => {
     meses.sort((x, y) => Number(x.periodo) - Number(y.periodo));
   }
 
+  // Viudez: los meses atrasados desde su inicio (fn_inicio_viudez) que aún no están
+  // creados. Al cerrar la planilla se crean: los anteriores a la planilla ya
+  // recibieron el % de la planilla (fuera del sistema) y se debe el resto; el mes de
+  // la planilla generada vale completo.
+  if (esConyuge(b.parentesco) && b.estado === "ACTIVO" && montoMesBen > 0 && !(deudaFallecido && deudaFallecido.pendiente > 0)) {
+    const [[iv]] = await pool.query("SELECT fn_inicio_viudez(?) AS i", [id]);
+    const [[pl]] = await pool.query(
+      `SELECT MAX(CASE WHEN ppl_estado_proceso = 'GENERADA' THEN ppl_numero END) AS gen, MAX(ppl_numero) AS ult
+         FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso IN ('GENERADA', 'CERRADA')`
+    );
+    const existentes = new Set(meses.map((m) => Number(m.periodo)));
+    const gen = toNum(pl?.gen);
+    const recibido = Math.round(montoMesBen * pctPlanilla) / 100;
+    for (let p = toNum(iv?.i); p && p <= toNum(pl?.ult); p = p % 100 === 12 ? p + 89 : p + 1) {
+      if (existentes.has(p)) continue;
+      const actual = gen && p >= gen;
+      meses.push({
+        periodo: p, concepto: "VIUDEZ", debe: montoMesBen, pagado: actual ? 0 : recibido,
+        pendiente: actual ? montoMesBen : r2(montoMesBen - recibido), estado: "SE CREA AL CERRAR", pagadoCon: null, porCrear: true,
+        recibidoFuera: !actual
+      });
+    }
+    meses.sort((x, y) => Number(x.periodo) - Number(y.periodo));
+  }
+
   const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + toNum(x[k]), 0) * 100) / 100;
   const pagosCerrados = pagos.filter((x) => x.estadoPlanilla === "CERRADA");
   const pension = toNum(b.pension);
