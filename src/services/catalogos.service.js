@@ -27,6 +27,8 @@ const catalogs = {
   },
   "manejo-administracion": {
     dir: "manejo-administracion",
+    // Lo usa todo el sistema (tipo de manejo): no se crea, edita ni borra.
+    soloLectura: "El catálogo Manejo administración es de solo consulta",
     required: ["descripcion"],
     upperFields: ["descripcion"],
     toDb: (data) => [data.descripcion],
@@ -92,6 +94,8 @@ const catalogs = {
   },
   "parametro-general": {
     dir: "parametro-general",
+    // Datos de la institución que usa todo el sistema: se edita, no se borra.
+    sinBorrar: "El parámetro general no se puede borrar",
     required: ["nombreEmpresa", "nit", "telefono", "correo"],
     // El correo NO se convierte a mayusculas (regla Version IV).
     upperFields: ["nombreEmpresa"],
@@ -153,6 +157,28 @@ const catalogs = {
   },
   "parametro-planilla": {
     dir: "parametro-planilla",
+    // Las planillas se crean, generan y cierran desde Nóminas. Aquí solo se corrigen
+    // el número y las fechas mientras la planilla no esté cerrada.
+    soloEditar: "Las planillas se crean desde Nóminas: aquí solo se corrigen el número y las fechas",
+    antesDeActualizar: async (id, data) => {
+      const [[p]] = await pool.execute(
+        "SELECT ppl_tipo_planilla, ppl_frecuencia, ppl_estado, ppl_estado_proceso FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_correlativo = ?", [id]
+      );
+      const err = (m, st = 400) => { const e = new Error(m); e.status = st; return e; };
+      if (!p) throw err("Registro no encontrado", 404);
+      if (String(p.ppl_estado_proceso || "").toUpperCase() === "CERRADA") throw err("La planilla ya está CERRADA: no se puede modificar", 409);
+      if (!/^\d{6}$/.test(String(data.numero || "")) || Number(String(data.numero).slice(4)) < 1 || Number(String(data.numero).slice(4)) > 12) {
+        throw err("El número de planilla debe ser AAAAMM (por ejemplo 202611)");
+      }
+      const f = (v) => String(v || "").slice(0, 10);
+      if (!f(data.fechaInicio) || !f(data.fechaFinal) || !f(data.fechaPago)) throw err("Las fechas son obligatorias");
+      if (f(data.fechaInicio) > f(data.fechaFinal)) throw err("La fecha de inicio no puede ser mayor que la final");
+      // Solo cambian número y fechas; lo demás queda como está.
+      return {
+        tipoPlanilla: p.ppl_tipo_planilla, frecuencia: p.ppl_frecuencia, estado: p.ppl_estado, _estadoActual: true,
+        numero: Number(data.numero), fechaInicio: f(data.fechaInicio), fechaFinal: f(data.fechaFinal), fechaPago: f(data.fechaPago)
+      };
+    },
     required: ["tipoPlanilla", "numero", "fechaInicio", "fechaFinal", "fechaPago", "frecuencia", "estado"],
     upperFields: ["frecuencia", "estado"],
     // Evita planillas duplicadas por tipo + numero (Version VII).
@@ -168,12 +194,12 @@ const catalogs = {
       }
     },
     validate: (data) => {
-      if (!ESTADOS_PLANILLA.includes(String(data.estado || "").toUpperCase())) {
+      if (!data._estadoActual && !ESTADOS_PLANILLA.includes(String(data.estado || "").toUpperCase())) {
         const error = new Error(`Estado no permitido. Use: ${ESTADOS_PLANILLA.join(", ")}`);
         error.status = 400;
         throw error;
       }
-      if (!FRECUENCIAS_PLANILLA.includes(String(data.frecuencia || "").toUpperCase())) {
+      if (!data._estadoActual && !FRECUENCIAS_PLANILLA.includes(String(data.frecuencia || "").toUpperCase())) {
         const error = new Error(`Frecuencia no permitida. Use: ${FRECUENCIAS_PLANILLA.join(", ")}`);
         error.status = 400;
         throw error;
@@ -191,6 +217,7 @@ const catalogs = {
       estado: row.ppl_estado,
       tipoPlanillaNombre: row.tpl_tipo_planilla,
       tipoPlanillaDescripcion: row.tipo_planilla_descripcion,
+      estadoProceso: row.ppl_estado_proceso,
       fechaCreacion: row.ppl_fecha_creacion,
       usuarioCreacion: row.ppl_usuario_creacion
     })
@@ -244,8 +271,18 @@ const getById = async (catalogKey, id) => {
   return catalog.toResponse(rows[0]);
 };
 
+// Reglas de los catálogos: los de solo consulta no se modifican; borrar es solo
+// del superusuario (ADMIN) y hay catálogos que nunca se borran.
+const prohibido = (mensaje) => { const e = new Error(mensaje); e.status = 403; return e; };
+const assertEscribible = (catalog) => { if (catalog.soloLectura) throw prohibido(catalog.soloLectura); };
+// Catálogos que solo se corrigen (no se crean ni se borran desde aquí).
+const assertCreable = (catalog) => { assertEscribible(catalog); if (catalog.soloEditar) throw prohibido(catalog.soloEditar); };
+const esSuperusuario = (user) => (Array.isArray(user?.roles) && user.roles.length ? user.roles : [user?.rol])
+  .some((r) => String(r || "").toUpperCase() === "ADMIN");
+
 const create = async (catalogKey, payload, currentUser) => {
   const catalog = getCatalog(catalogKey);
+  assertCreable(catalog);
   const data = normalizePayload(catalog, payload);
   validatePayload(catalog, data);
   if (typeof catalog.checkDuplicate === "function") await catalog.checkDuplicate(data, null);
@@ -257,7 +294,9 @@ const create = async (catalogKey, payload, currentUser) => {
 
 const update = async (catalogKey, id, payload, currentUser) => {
   const catalog = getCatalog(catalogKey);
-  const data = normalizePayload(catalog, payload);
+  assertEscribible(catalog);
+  let data = normalizePayload(catalog, payload);
+  if (typeof catalog.antesDeActualizar === "function") data = await catalog.antesDeActualizar(id, data);
   validatePayload(catalog, data);
   if (typeof catalog.checkDuplicate === "function") await catalog.checkDuplicate(data, id);
   await getById(catalogKey, id);
@@ -268,6 +307,9 @@ const update = async (catalogKey, id, payload, currentUser) => {
 
 const remove = async (catalogKey, id, currentUser) => {
   const catalog = getCatalog(catalogKey);
+  assertCreable(catalog);
+  if (catalog.sinBorrar) throw prohibido(catalog.sinBorrar);
+  if (!esSuperusuario(currentUser)) throw prohibido("Solo el superusuario puede borrar registros de los catálogos");
   await getById(catalogKey, id);
 
   try {

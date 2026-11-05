@@ -628,8 +628,13 @@ const estadoCuenta = async (id) => {
     fase = deudaFallecido && deudaFallecido.pendiente > 0 ? "COBRANDO LA DEUDA DEL FALLECIDO"
       : pendienteCodigo > 0 ? "COBRANDO LO PENDIENTE DE LOS MESES CON EL CÓDIGO DEL FALLECIDO" : "VIUDEZ";
   }
-  else if (b.parentesco === "HIJO" && !esMenor) fase = "MAYOR DE EDAD: SE LE LIQUIDA LO QUE SE LE DEBE";
+  else if (b.parentesco === "HIJO" && !esMenor) fase = "MAYOR DE EDAD: COBRA LO QUE SE LE DEBE";
   else fase = "ORFANDAD";
+  // Hijo (sin invalidez): forma de cobro de lo atrasado al cumplir 18.
+  const formaCobro18 = b.parentesco === "HIJO" ? await formaCobroHijo(id).catch(() => null) : null;
+  if (formaCobro18 && !esMenor && b.estado === "ACTIVO") {
+    fase = `MAYOR DE EDAD: COBRA LO QUE SE LE DEBE (${formaCobro18.modo === "CONVENIO" ? "CONVENIO" : formaCobro18.modo === "PORCENTAJE" ? "POR PORCENTAJE" : "COMPLETO, DE UNA VEZ"})`;
+  }
 
   return {
     beneficiario: {
@@ -644,6 +649,7 @@ const estadoCuenta = async (id) => {
     fase,
     mensual: { seLeDebe: montoMes, seLePaga: Math.round(montoMes * pctPlanilla) / 100, porcentajePlanilla: pctPlanilla },
     deudaFallecido,
+    formaCobro18,
     // Meses que cobró con el código del fallecido (desde que falleció hasta que se registró).
     historiaConCodigo: historiaConCodigo.map((h) => ({
       periodo: h.periodo, pension: h.pensionCompleta, recibido: h.recibidoMes, debe: h.esDeuda ? h.montoGenerado : 0,
@@ -843,7 +849,108 @@ const reactivar = async (id, currentUser) => {
   return { id: Number(id), estado: "ACTIVO" };
 };
 
+// ---------------------------------------------------------------------------
+// Hijo que cumple 18: forma de cobro de lo que se le debe (lo atrasado).
+//   COMPLETO (por defecto): todo de una vez en la planilla siguiente al cumpleaños.
+//   PORCENTAJE: cada mes el % de la planilla de su monto, hasta saldar.
+//   CONVENIO: cuota fija (RPJ_MNT_CONVENIO_PAGO VIGENTE del hijo).
+// ---------------------------------------------------------------------------
+const AUTORIZA = ["JUEZ", "JUNTA_DIRECTIVA", "ACUERDO_INTERNO"];
+const datosHijo = async (id, executor = pool) => {
+  const [[b]] = await executor.query(
+    `SELECT b.ben_correlativo AS id, b.ben_id_jubilado AS idJubilado, b.ben_tipo_parentesco AS parentesco, b.ben_estado AS estado,
+            b.ben_fecha_nacimiento AS fnac, b.ben_forma_cobro AS forma, b.ben_monto AS monto, b.ben_porcentaje AS pct,
+            TRIM(CONCAT(COALESCE(b.ben_nombres, ''), ' ', b.ben_apellidos)) AS nombre,
+            (SELECT MAX(s.sal_salario) FROM RPJ_MNT_SALARIO s WHERE s.sal_id_jubilado = b.ben_id_jubilado AND s.sal_tipo_manejo = 2 AND s.sal_tipo_ingreso = 1) AS pension,
+            (SELECT COALESCE(SUM(d.dbe_monto_pendiente), 0) FROM RPJ_PRC_DEUDA_BENEFICIARIO d
+              WHERE d.dbe_id_beneficiario = b.ben_correlativo AND d.dbe_estado IN ('PENDIENTE','PARCIAL')) AS pendiente
+       FROM RPJ_MNT_BENEFICIARIO b WHERE b.ben_correlativo = ?`, [id]
+  );
+  if (!b) throw createError("Beneficiario no encontrado", 404);
+  if (String(b.parentesco).toUpperCase() !== "HIJO") throw createError("La forma de cobro al cumplir 18 aplica solo a hijos (no a hijos con invalidez)", 409);
+  const [[pla]] = await executor.query(
+    "SELECT ppl_porcentaje_pago AS pct FROM RPJ_CAT_PARAMETRO_PLANILLA WHERE ppl_tipo_planilla = 2 AND ppl_estado_proceso <> 'REVERSADA' ORDER BY ppl_numero DESC LIMIT 1"
+  );
+  const mensual = b.monto !== null && b.monto !== undefined ? r2(b.monto) : r2((toNum(b.pension) * toNum(b.pct)) / 100);
+  const porcentaje = toNum(pla?.pct || 50);
+  const f = new Date(b.fnac);
+  const cumple18 = b.fnac ? new Date(Date.UTC(f.getUTCFullYear() + 18, f.getUTCMonth(), f.getUTCDate())).toISOString().slice(0, 10) : null;
+  return { ...b, mensual, porcentaje, cuotaPorcentaje: r2((mensual * porcentaje) / 100), pendiente: r2(b.pendiente), cumple18 };
+};
+
+const convenioHijo = async (id, executor = pool) => {
+  const [[c]] = await executor.query(
+    `SELECT con_correlativo AS id, con_monto_cuota AS cuota, con_fecha_inicio AS fechaInicio, con_autorizado_por AS autorizadoPor, con_no_documento AS documento
+       FROM RPJ_MNT_CONVENIO_PAGO WHERE con_id_beneficiario = ? AND con_estado = 'VIGENTE' ORDER BY con_correlativo DESC LIMIT 1`, [id]
+  );
+  return c ? { ...c, cuota: toNum(c.cuota) } : null;
+};
+
+const formaCobroHijo = async (id) => {
+  const h = await datosHijo(id);
+  const convenio = await convenioHijo(id);
+  const modo = convenio ? "CONVENIO" : h.forma === "PORCENTAJE" ? "PORCENTAJE" : "COMPLETO";
+  return {
+    id: h.id, nombre: h.nombre, cumple18: h.cumple18, pendiente: h.pendiente, mensual: h.mensual, porcentaje: h.porcentaje,
+    cuotaPorcentaje: h.cuotaPorcentaje, modo, convenio
+  };
+};
+
+const guardarFormaCobroHijo = async (id, body, currentUser) => {
+  const modo = String(body?.modo || "").toUpperCase();
+  if (!["COMPLETO", "PORCENTAJE", "CONVENIO"].includes(modo)) throw createError("Indique la forma de cobro: COMPLETO, PORCENTAJE o CONVENIO");
+  const usuario = currentUser?.usuario || "sistema";
+  const jm = require("./jubiladosModulo.service");
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const h = await datosHijo(id, conn);
+    const antes = await convenioHijo(id, conn);
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (antes) {
+      await conn.execute(
+        `UPDATE RPJ_MNT_CONVENIO_PAGO SET con_estado = 'CANCELADO',
+                con_observaciones = LEFT(CONCAT(COALESCE(CONCAT(con_observaciones, ' | '), ''), ?), 500) WHERE con_correlativo = ?`,
+        [`Cambio de forma de cobro a ${modo} el ${hoy} (${usuario})`, antes.id]
+      );
+    }
+    let convenio = null;
+    if (modo === "CONVENIO") {
+      const cuota = r2(body?.cuota);
+      if (!(cuota > 0)) throw createError("La cuota mensual del convenio debe ser mayor a cero");
+      const autorizado = String(body?.autorizadoPor || "").toUpperCase();
+      if (!AUTORIZA.includes(autorizado)) throw createError("Indique quién autoriza el convenio (juez, junta directiva o acuerdo interno)");
+      const documento = String(body?.documento || "").trim();
+      if (!documento) throw createError("Indique el número de documento del convenio");
+      const fechaInicio = String(body?.fechaInicio || hoy).slice(0, 10);
+      const base = Math.max(h.pendiente, cuota);
+      const cuotas = Math.max(1, Math.ceil(base / cuota));
+      const [fy, fm, fd] = fechaInicio.split("-").map(Number);
+      const fin = new Date(Date.UTC(fy, fm - 1 + cuotas, fd)).toISOString().slice(0, 10);
+      const [res] = await conn.execute(
+        `INSERT INTO RPJ_MNT_CONVENIO_PAGO (con_id_jubilado, con_id_beneficiario, con_tipo_convenio, con_monto_total, con_cantidad_cuotas,
+           con_monto_cuota, con_fecha_inicio, con_fecha_fin_estimada, con_autorizado_por, con_no_documento, con_estado, con_observaciones, con_usuario_creacion)
+         VALUES (?, ?, 'MENSUAL', ?, ?, ?, ?, ?, ?, ?, 'VIGENTE', ?, ?)`,
+        [h.idJubilado, id, base, cuotas, cuota, fechaInicio, fin, autorizado, documento.slice(0, 100),
+         `Orfandad al cumplir 18: cobro de lo atrasado por convenio. ${String(body?.observaciones || "").trim()}`.trim().slice(0, 500), usuario]
+      );
+      convenio = { id: res.insertId, cuota, cuotas, fechaInicio, fechaFin: fin };
+    }
+    await conn.execute("UPDATE RPJ_MNT_BENEFICIARIO SET ben_forma_cobro = ? WHERE ben_correlativo = ?", [modo === "COMPLETO" ? null : modo, id]);
+    const recalculadas = await jm.recalcularBeneficiariosGenerados(conn, usuario);
+    await conn.commit();
+    logger.info("Forma de cobro de orfandad al cumplir 18", { idBeneficiario: id, modo, convenio, usuario });
+    return { modo, convenio, planillasRecalculadas: recalculadas };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
 module.exports = {
+  formaCobroHijo, guardarFormaCobroHijo,
   buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor, estadoCuenta, pdfEstadoCuenta, actualizar, actualizarPorcentajes, actualizarMontos,
   getActivos, getSuspendidos, suspender, reactivar
 };

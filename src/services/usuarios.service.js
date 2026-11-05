@@ -49,7 +49,8 @@ const validateUserPayload = (payload, isCreate = true) => {
   const correo = String(payload.correo || "").trim();
   const fechaInicio = payload.fechaInicio;
   const estado = validateEstado(payload.estado || "ACTIVO");
-  const rol = rolesService.validateRole(payload.rol);
+  // El rol es opcional: los permisos se asignan en Roles y permisos.
+  const rol = payload.rol ? rolesService.validateRole(payload.rol) : null;
 
   if (isCreate && (!usuario || usuario.length < 3 || /\s/.test(usuario))) {
     throw createError("El usuario es obligatorio, minimo 3 caracteres y sin espacios");
@@ -130,7 +131,7 @@ const createUser = async (payload, currentUser) => {
       createdBy
     ]);
 
-    await rolesService.upsertUserRole(result.insertId, data.rol, createdBy, connection);
+    if (data.rol) await rolesService.upsertUserRole(result.insertId, data.rol, createdBy, connection);
     await connection.commit();
 
     logger.info("Usuario creado", { id: result.insertId, usuario: data.usuario, rol: data.rol, createdBy });
@@ -161,7 +162,7 @@ const updateUser = async (id, payload, currentUser) => {
       data.fechaInicio,
       id
     ]);
-    await rolesService.upsertUserRole(id, data.rol, updatedBy, connection);
+    if (data.rol) await rolesService.upsertUserRole(id, data.rol, updatedBy, connection);
     await connection.commit();
     sessionCache.invalidar(id);
 

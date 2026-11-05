@@ -25,7 +25,11 @@ const actualizarPorcentajes = async (req, res, next) => { try { return successRe
 
 const estadoCuenta = async (req, res, next) => { try { return successResponse(res, await service.estadoCuenta(req.params.id), "Estado de cuenta del beneficiario"); } catch (e) { next(e); } };
 
-module.exports = { estadoCuenta, estadoCuentaPdf, actualizar, actualizarPorcentajes, actualizarMontos,
+const formaCobroHijo = async (req, res, next) => { try { return successResponse(res, await service.formaCobroHijo(req.params.id), "Forma de cobro"); } catch (e) { next(e); } };
+const guardarFormaCobroHijo = async (req, res, next) => { try { return successResponse(res, await service.guardarFormaCobroHijo(req.params.id, req.body, req.user), "Forma de cobro guardada"); } catch (e) { next(e); } };
+
+module.exports = {
+  formaCobroHijo, guardarFormaCobroHijo, estadoCuenta, estadoCuentaPdf, actualizar, actualizarPorcentajes, actualizarMontos,
   buscarJubilados, getByJubilado, registrarLote, remove, registrarTutor,
   getActivos, getSuspendidos, suspender, reactivar
 };

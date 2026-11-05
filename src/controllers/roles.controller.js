@@ -26,8 +26,23 @@ const updateUserRole = async (req, res, next) => {
   }
 };
 
+const modulosPermiso = (req, res) => successResponse(res, rolesService.listModulosPermiso(), "Módulos y niveles");
+
+// Matriz de permisos: { admin: bool, permisos: { EPQ: 0..3, ... } }.
+const updatePermisos = async (req, res, next) => {
+  try {
+    const data = await rolesService.setUserPermisos(req.params.id, req.body, req.user?.usuario);
+    sessionCache.invalidar(req.params.id);
+    return successResponse(res, data, "Permisos actualizados correctamente");
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   listRoles,
   listRoleTypes,
-  updateUserRole
+  updateUserRole,
+  modulosPermiso,
+  updatePermisos
 };

@@ -1563,7 +1563,7 @@ const generarEstadoCuentaPdf = async (id, usuario) => {
 module.exports = {
   listarFallecidos, corregirFallecimiento, revertirFallecimiento, cancelarDeudaFallecido, revertirCancelacionDeuda, cancelarMesDeuda, revertirCancelacionMes,
   aplicarPrestacionesFallecimiento, calcularPrestacionesFallecimiento, esPrestacion, nombrePrestacion,
-  formaCobro, guardarFormaCobro, convenioVigente,
+  formaCobro, guardarFormaCobro, convenioVigente, recalcularBeneficiariosGenerados,
   registrarFallecidoEnServicio, descuentosMes, editarDescuentosMes, liquidacionPdf,
   buscar, noAmparistas, deudaTotal, beneficiariosRegistrados, beneficiariosActivos,
   resumenFinanciero, ultimosPagos, deudaDetalle, historiaCompleta, historiaDespuesDeFallecer, mesFallecimiento, registrarFallecimiento,

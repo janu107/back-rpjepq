@@ -17,6 +17,8 @@ router.get("/activos", ADMIN_OP, controller.getActivos);
 router.get("/suspendidos", ADMIN_OP, controller.getSuspendidos);
 router.get("/jubilado/:id", ADMIN_OP, controller.getByJubilado);
 router.get("/:id/estado-cuenta", ADMIN_OP, controller.estadoCuenta);
+router.get("/:id/forma-cobro", ADMIN_OP, controller.formaCobroHijo);
+router.put("/:id/forma-cobro", ADMIN_OP, auditAction("BENEFICIARIOS", "FORMA_COBRO_18", (req) => `Forma de cobro al cumplir 18, beneficiario ${req.params.id}: ${req.body?.modo || ""}`), controller.guardarFormaCobroHijo);
 router.get("/:id/estado-cuenta/pdf", ADMIN_OP, controller.estadoCuentaPdf);
 
 // --- Escritura ---

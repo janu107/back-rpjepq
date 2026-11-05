@@ -11,6 +11,8 @@ router.use(authMiddleware, authorizeRoles("ADMIN"));
 
 router.get("/", rolesController.listRoles);
 router.get("/tipos", rolesController.listRoleTypes);
+router.get("/modulos", rolesController.modulosPermiso);
+router.put("/usuario/:id/permisos", auditAction("ROLES", "CAMBIO_PERMISOS", (req) => `Permisos por módulo del usuario ${req.params.id}: ${JSON.stringify(req.body || {})}`), rolesController.updatePermisos);
 router.put("/usuario/:id", auditAction("ROLES", "CAMBIO_ROL", (req) => `Cambio de rol usuario ${req.params.id}`), rolesController.updateUserRole);
 
 module.exports = router;

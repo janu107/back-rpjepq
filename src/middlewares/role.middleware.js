@@ -56,8 +56,7 @@ const MODULOS_URL = {
   catalogos: ["CATALOGOS"]
 };
 
-const MODULOS_NEGOCIO = ["EPQ", "REGIMEN", "JUBILADOS"];
-const ROLES_NUEVOS = ["CATALOGOS", "EPQ", "REGIMEN", "JUBILADOS", "REPORTES", "ADMINISTRACION", "CONSULTA"];
+const { nivelesPorPantalla, pantallasDeRuta, PANTALLAS, NEGOCIO } = require("../utils/permisosModulo");
 
 const rolesDe = (user) => {
   const lista = Array.isArray(user?.roles) && user.roles.length ? user.roles : [user?.rol];
@@ -78,31 +77,35 @@ const nivelesEfectivos = (user, url, method) => {
   const modulos = MODULOS_URL[segmentos[0]] || [];
   const lectura = String(method || "GET").toUpperCase() === "GET";
 
-  roles.forEach((rol) => {
-    if (rol === "ADMIN") niveles.add("ADMIN");
-    if (rol === "OPERADOR" || rol === "ADMINISTRACION") niveles.add("OPERADOR");
+  if (roles.includes("ADMIN")) niveles.add("ADMIN");
+  // Roles anteriores con alcance general: siguen funcionando igual.
+  if (roles.includes("OPERADOR") || roles.includes("ADMINISTRACION")) niveles.add("OPERADOR");
 
-    if (MODULOS_NEGOCIO.includes(rol) && modulos.includes(rol)) niveles.add("OPERADOR");
-    // Quien trabaja un módulo también puede consultar e imprimir sus reportes.
-    if (MODULOS_NEGOCIO.includes(rol) && modulos.includes("REPORTES")) niveles.add("CONSULTA");
+  // Nivel por ventana (matriz de Roles y permisos; los permisos de módulo y los roles
+  // anteriores valen para todas las ventanas de su módulo).
+  const nv = nivelesPorPantalla(roles);
+  const pantallas = pantallasDeRuta(segmentos.join("/"));
+  const familiasRuta = new Set([...modulos, ...pantallas.flatMap((p) => p.familias)]);
+  const propio = Math.max(0, ...pantallas.map((p) => nv[p.clave]));
+  const agregar = (...l) => l.forEach((x) => niveles.add(x));
 
-    if (rol === "CATALOGOS" && modulos.includes("CATALOGOS")) {
-      // El catálogo de manejo/administración sólo se puede consultar.
-      const esManejo = /manejo/i.test(segmentos[1] || "");
-      if (lectura || !esManejo) niveles.add("OPERADOR");
-    }
-
-    if (rol === "REPORTES" && modulos.includes("REPORTES")) niveles.add("CONSULTA");
-
-    if (rol === "CONSULTA") {
-      if (lectura && modulos.some((m) => MODULOS_NEGOCIO.includes(m))) niveles.add("OPERADOR");
-      if (modulos.includes("REPORTES")) niveles.add("CONSULTA");
-    }
-  });
-
-  // Lectura de catálogos para cualquier usuario con un rol del listado nuevo.
-  if (lectura && modulos.includes("CATALOGOS") && roles.some((r) => ROLES_NUEVOS.includes(r))) {
-    niveles.add("OPERADOR");
+  if (!lectura) {
+    // Escribir: solo en la ventana dueña de la ruta.
+    if (propio >= 3) agregar("ADMIN", "OPERADOR", "CONSULTA");
+    else if (propio === 2) agregar("OPERADOR", "CONSULTA");
+    else if (propio === 1) agregar("CONSULTA");
+  } else {
+    // Leer: su ventana, o cualquier ventana del mismo módulo (listas que usan sus pantallas).
+    const familiasUsuario = new Set();
+    PANTALLAS.forEach((p) => {
+      if (nv[p.clave] > 0) [...p.familias, ...(p.leeTambien || [])].forEach((f) => familiasUsuario.add(f));
+    });
+    if (propio >= 3) agregar("ADMIN");
+    if (propio > 0 || [...familiasRuta].some((f) => familiasUsuario.has(f))) agregar("OPERADOR", "CONSULTA");
+    // Quien trabaja un módulo de negocio también consulta e imprime reportes.
+    if (familiasRuta.has("REPORTES") && NEGOCIO.some((f) => familiasUsuario.has(f))) agregar("OPERADOR", "CONSULTA");
+    // Los catálogos los leen todos los que tengan algún permiso (listas desplegables).
+    if (familiasRuta.has("CATALOGOS") && familiasUsuario.size) agregar("OPERADOR");
   }
 
   return niveles;
