@@ -120,6 +120,7 @@ router.use("/generacion-planilla", generacionPlanillaRoutes);
 router.use("/reportes/nomina", reportesNominaRoutes);
 router.use("/descuentos-judiciales", descuentosJudicialesRoutes);
 router.use("/prestamos-regimen", prestamosRegimenRoutes);
+router.use("/prestamos-jubilados", prestamosRegimenRoutes.jubilados);
 router.use("/datos-planilla", datosPlanillaRoutes);
 router.use("/reportes/regimen", reportesRegimenRoutes);
 router.use("/auditoria", auditoriaRoutes);

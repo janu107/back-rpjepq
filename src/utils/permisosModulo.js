@@ -32,7 +32,7 @@ const PANTALLAS = [
   { clave: "REG_JUNTA", grupo: "Proceso Régimen", nombre: "Juntas Directivas", detalle: "Miembros de las juntas", familias: ["REGIMEN"], paths: ["/junta-directiva"], api: [/^junta-directiva(\/|$)/] },
   { clave: "REG_DIETAS", grupo: "Proceso Régimen", nombre: "Pago Dietas", detalle: "Sesiones, asistencia y pago de dietas", familias: ["REGIMEN"], paths: ["/dietas"], api: [/^(dietas|sesiones)(\/|$)/] },
   { clave: "REG_DESC_JUDICIALES", grupo: "Proceso Régimen", nombre: "Descuentos Judiciales", detalle: "Embargos y pensiones alimenticias", familias: ["REGIMEN"], paths: ["/descuentos-judiciales"], api: [/^descuentos-judiciales(\/|$)/] },
-  { clave: "REG_PRESTAMOS", grupo: "Proceso Régimen", nombre: "Préstamos Régimen", detalle: "Préstamos de bancos y asociación", familias: ["REGIMEN"], paths: ["/prestamos-regimen"], api: [/^prestamos-regimen(\/|$)/] },
+  { clave: "REG_PRESTAMOS", grupo: "Proceso Régimen", nombre: "Préstamos Régimen", detalle: "Préstamos de bancos y asociación de los empleados", familias: ["REGIMEN"], paths: ["/prestamos-regimen"], api: [/^prestamos-regimen(\/|$)/] },
 
   { clave: "JUB_CONTROL", grupo: "Jubilados y Pensiones", nombre: "Control de Jubilados", detalle: "Jubilados, pensión y datos de pago", familias: ["JUBILADOS"], paths: ["/jubilados"], api: [/^jubilados(?!\/(fallecidos|fallecido-en-servicio|\d+\/(fallecimiento|deuda|forma-cobro|historia|liquidacion)))/, /^datos-planilla(\/|$)/] },
   { clave: "JUB_BENEFICIARIOS", grupo: "Jubilados y Pensiones", nombre: "Beneficiarios", detalle: "Viudas, huérfanos, tutores y montos", familias: ["JUBILADOS"], paths: ["/beneficiarios"], api: [/^beneficiarios(?!\/(suspendidos|\d+\/(suspender|reactivar)))/] },
@@ -43,6 +43,7 @@ const PANTALLAS = [
   { clave: "JUB_ESTADO_CUENTA", grupo: "Jubilados y Pensiones", nombre: "Estado de Cuenta", detalle: "Historia, ajustes de meses y liquidación", familias: ["JUBILADOS"], paths: ["/estado-cuenta"], api: [/^jubilados\/\d+\/(historia|liquidacion)/] },
   { clave: "JUB_REPORTES", grupo: "Jubilados y Pensiones", nombre: "Reportes y Dashboard", detalle: "Reportes de jubilados", familias: ["JUBILADOS"], paths: ["/reportes-jubilados"], api: [/^jubilados-reportes(\/|$)/] },
   { clave: "JUB_PRESTACIONES", grupo: "Jubilados y Pensiones", nombre: "Prestaciones Jubilados", detalle: "Bono 14 y aguinaldo de jubilados", familias: ["JUBILADOS"], paths: ["/prestaciones-jubilados"], api: [/^prestaciones-jubilados(\/|$)/] },
+  { clave: "JUB_PRESTAMOS", grupo: "Jubilados y Pensiones", nombre: "Préstamos Jubilados", detalle: "Préstamos de bancos y asociación de los jubilados", familias: ["JUBILADOS"], paths: ["/prestamos-jubilados"], api: [/^prestamos-jubilados(\/|$)/] },
 
   { clave: "NOM_EMPLEADOS", grupo: "Nóminas", nombre: "Planilla de Empleados", detalle: "Generar, cerrar y reversar la planilla de empleados", familias: ["REGIMEN"], paths: ["/planillas-trabajadores", "/generacion-planilla"], api: [/^(planillas-trabajadores|generacion-planilla)(\/|$)/] },
   { clave: "NOM_JUBILADOS", grupo: "Nóminas", nombre: "Planilla de Jubilados y Amparistas", detalle: "Generar, cerrar y reversar la planilla de jubilados", familias: ["JUBILADOS"], paths: ["/planillas-pensionados", "/nominas-jubilados"], api: [/^(planillas-pensionados|nominas)(\/|$)/] },

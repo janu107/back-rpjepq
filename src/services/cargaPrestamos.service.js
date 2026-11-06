@@ -59,6 +59,70 @@ const calcular = async (idPrestamo, body) => {
   return calcularPago({ saldoAnterior: e.saldo, tasaAnual: e.tasa, cuotaNivelada: e.cuota, seguroBase: e.seguro, montoDescontado: monto, fecha });
 };
 
+// Graba los pagos de un préstamo (en orden de fecha) con las mismas reglas que la
+// carga masiva: un pago por mes, nunca antes del último pago y no si ya está saldado.
+// Si el saldo llega a 0, el préstamo queda CANCELADO. Devuelve los pagos grabados.
+const registrarPagos = async (conn, idPrestamo, lista, usuario, resumen) => {
+  const e = await estadoPrestamo(idPrestamo, conn);
+  const [meses] = await conn.query(
+    "SELECT DISTINCT DATE_FORMAT(dpr_fecha_pago, '%Y-%m') AS m FROM RPJ_MNT_DETALLE_PRESTAMO WHERE dpr_id_prestamo = ?", [idPrestamo]
+  );
+  const yaTiene = new Set(meses.map((x) => x.m));
+  let saldo = e.saldo;
+  let ultima = e.ultimaFecha;
+  const grabados = [];
+  for (const f of lista.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.fila - b.fila)) {
+    const mes = f.fecha.slice(0, 7);
+    if (yaTiene.has(mes)) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya tiene un pago en ${mes.split("-").reverse().join("/")}` }); continue; }
+    if (ultima && f.fecha <= ultima) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya tiene pagos posteriores (último ${ultima.split("-").reverse().join("/")})` }); continue; }
+    if (saldo <= 0) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya está saldado` }); continue; }
+    const p = calcularPago({ saldoAnterior: saldo, tasaAnual: e.tasa, cuotaNivelada: e.cuota, seguroBase: e.seguro, montoDescontado: f.monto, fecha: f.fecha });
+    await conn.execute(
+      `INSERT INTO RPJ_MNT_DETALLE_PRESTAMO (dpr_id_prestamo, dpr_fecha_pago, dpr_descuento_nomina_aportacion, dpr_cuota_nivelada,
+         dpr_amortizacion, dpr_intereses, dpr_saldo, dpr_mora, dpr_seguro, dpr_usuario_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [idPrestamo, p.fechaPago, p.descuentoNominaAportacion, p.cuotaNivelada, p.amortizacion, p.intereses, p.saldo, p.mora, p.seguro, usuario]
+    );
+    resumen.grabados += 1;
+    grabados.push(p);
+    yaTiene.add(mes); saldo = p.saldo; ultima = f.fecha;
+  }
+  // Préstamo saldado: queda CANCELADO y el empleado sin préstamo activo.
+  if (saldo <= 0 && e.saldo > 0) {
+    await conn.execute("UPDATE RPJ_MNT_PRESTAMO SET pre_estado = 'CANCELADO' WHERE pre_correlativo = ?", [idPrestamo]);
+    await conn.execute("UPDATE RPJ_MNT_APORTACION_EPQ SET apo_tiene_prestamo = 0 WHERE apo_correlativo = ?", [e.idAportacion]);
+    resumen.prestamosSaldados.push(e.contrato);
+  }
+  return grabados;
+};
+
+// Pago individual (acción "Registrar pago" del Detalle de préstamos): igual que una
+// fila de la carga masiva, pero para un préstamo elegido. body: { fechaPago, monto }.
+const pagoIndividual = async (idPrestamo, body, currentUser) => {
+  const fecha = String(body?.fechaPago || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw createError("Indique la fecha de pago");
+  const raw = String(body?.monto ?? "").replace(/[Q,\s]/g, "");
+  const monto = Number(raw);
+  if (raw === "" || Number.isNaN(monto) || monto < 0) throw createError("Indique el monto descontado");
+  const e = await estadoPrestamo(idPrestamo);
+  if (["CANCELADO", "ANULADO"].includes(String(e.estado).toUpperCase())) throw createError(`El préstamo ${e.contrato} está ${e.estado}`);
+  const usuario = currentUser?.usuario || "sistema";
+  const resumen = { totalFilas: 1, grabados: 0, errores: [], prestamosSaldados: [] };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [pago] = await registrarPagos(conn, idPrestamo, [{ fila: 1, codigo: "", fecha, monto: r2(monto) }], usuario, resumen);
+    if (!pago) throw createError(resumen.errores[0]?.error || "No fue posible registrar el pago");
+    await conn.commit();
+    logger.info("Pago individual de préstamo", { idPrestamo, fecha, monto, usuario });
+    return { ...pago, contrato: e.contrato, saldado: resumen.prestamosSaldados.length > 0 };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+};
+
 // ---- Carga masiva -----------------------------------------------------------
 const normalizar = (v) => String(v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
 const COLUMNAS = [
@@ -136,33 +200,7 @@ const cargaMasiva = async (buffer, currentUser) => {
     });
 
     for (const [idPrestamo, lista] of porPrestamo) {
-      const e = await estadoPrestamo(idPrestamo, conn);
-      const [meses] = await conn.query(
-        "SELECT DISTINCT DATE_FORMAT(dpr_fecha_pago, '%Y-%m') AS m FROM RPJ_MNT_DETALLE_PRESTAMO WHERE dpr_id_prestamo = ?", [idPrestamo]
-      );
-      const yaTiene = new Set(meses.map((x) => x.m));
-      let saldo = e.saldo;
-      let ultima = e.ultimaFecha;
-      for (const f of lista.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.fila - b.fila)) {
-        const mes = f.fecha.slice(0, 7);
-        if (yaTiene.has(mes)) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya tiene un pago en ${mes.split("-").reverse().join("/")}` }); continue; }
-        if (ultima && f.fecha <= ultima) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya tiene pagos posteriores (último ${ultima.split("-").reverse().join("/")})` }); continue; }
-        if (saldo <= 0) { resumen.errores.push({ fila: f.fila, codigo: f.codigo, error: `El préstamo ${e.contrato} ya está saldado` }); continue; }
-        const p = calcularPago({ saldoAnterior: saldo, tasaAnual: e.tasa, cuotaNivelada: e.cuota, seguroBase: e.seguro, montoDescontado: f.monto, fecha: f.fecha });
-        await conn.execute(
-          `INSERT INTO RPJ_MNT_DETALLE_PRESTAMO (dpr_id_prestamo, dpr_fecha_pago, dpr_descuento_nomina_aportacion, dpr_cuota_nivelada,
-             dpr_amortizacion, dpr_intereses, dpr_saldo, dpr_mora, dpr_seguro, dpr_usuario_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [idPrestamo, p.fechaPago, p.descuentoNominaAportacion, p.cuotaNivelada, p.amortizacion, p.intereses, p.saldo, p.mora, p.seguro, usuario]
-        );
-        resumen.grabados += 1;
-        yaTiene.add(mes); saldo = p.saldo; ultima = f.fecha;
-      }
-      // Préstamo saldado: queda CANCELADO y el empleado sin préstamo activo.
-      if (saldo <= 0 && e.saldo > 0) {
-        await conn.execute("UPDATE RPJ_MNT_PRESTAMO SET pre_estado = 'CANCELADO' WHERE pre_correlativo = ?", [idPrestamo]);
-        await conn.execute("UPDATE RPJ_MNT_APORTACION_EPQ SET apo_tiene_prestamo = 0 WHERE apo_correlativo = ?", [e.idAportacion]);
-        resumen.prestamosSaldados.push(e.contrato);
-      }
+      await registrarPagos(conn, idPrestamo, lista, usuario, resumen);
     }
     await conn.commit();
   } catch (err) {
@@ -204,4 +242,4 @@ const plantilla = async () => {
   return { buffer: await wb.xlsx.writeBuffer(), filename: "plantilla_pagos_prestamos.xlsx" };
 };
 
-module.exports = { calcularPago, calcular, cargaMasiva, plantilla };
+module.exports = { calcularPago, calcular, cargaMasiva, plantilla, pagoIndividual };

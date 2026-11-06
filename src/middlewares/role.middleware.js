@@ -45,6 +45,7 @@ const MODULOS_URL = {
   "planillas-pensionados": ["JUBILADOS"],
   nominas: ["JUBILADOS"],
   "prestaciones-jubilados": ["JUBILADOS"],
+  "prestamos-jubilados": ["JUBILADOS"],
   "jubilados-reportes": ["JUBILADOS", "REPORTES"],
 
   // Compartidos por Régimen y Jubilados

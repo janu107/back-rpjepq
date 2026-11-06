@@ -94,19 +94,23 @@ const withFkBypass = async (fn) => {
   }
 };
 
-const list = async () => {
+// tipo: 1 = empleados (Préstamos Régimen), 2 = jubilados (Préstamos Jubilados).
+// Cada ventana solo ve y modifica los préstamos de su tipo.
+const deTipo = (row, tipo) => !tipo || Number(row.tipoManejo) === Number(tipo);
+
+const list = async (tipo = null) => {
   const [rows] = await pool.execute(sql("listar"));
-  return rows.map(mapRow);
+  return rows.map(mapRow).filter((r) => deTipo(r, tipo));
 };
 
-const getById = async (id) => {
+const getById = async (id, tipo = null) => {
   const [rows] = await pool.execute(sql("obtenerPorId"), [id]);
-  if (!rows[0]) throw createError("Préstamo régimen no encontrado", 404);
+  if (!rows[0] || !deTipo(mapRow(rows[0]), tipo)) throw createError("Préstamo no encontrado", 404);
   return mapRow(rows[0]);
 };
 
-const create = async (payload, currentUser) => {
-  const data = normalize(payload);
+const create = async (payload, currentUser, tipo = null) => {
+  const data = normalize(tipo ? { ...payload, tipoManejo: tipo } : payload);
   validate(data);
   await ensureUniqueReferencia(data.noReferencia);
   const createdBy = currentUser?.usuario || "sistema";
@@ -115,23 +119,23 @@ const create = async (payload, currentUser) => {
     return result.insertId;
   });
   logger.info("Préstamo régimen creado", { id: insertId, createdBy });
-  return getById(insertId);
+  return getById(insertId, tipo);
 };
 
-const update = async (id, payload, currentUser) => {
-  const data = normalize(payload);
+const update = async (id, payload, currentUser, tipo = null) => {
+  const data = normalize(tipo ? { ...payload, tipoManejo: tipo } : payload);
   validate(data);
-  await getById(id);
+  await getById(id, tipo);
   await ensureUniqueReferencia(data.noReferencia, id);
   await withFkBypass(async (conn) => {
     await conn.execute(sql("actualizar"), [...toDb(data), id]);
   });
   logger.info("Préstamo régimen actualizado", { id, updatedBy: currentUser?.usuario });
-  return getById(id);
+  return getById(id, tipo);
 };
 
-const remove = async (id, currentUser) => {
-  await getById(id);
+const remove = async (id, currentUser, tipo = null) => {
+  await getById(id, tipo);
   await pool.execute(sql("eliminar"), [id]);
   logger.info("Préstamo régimen eliminado", { id, deletedBy: currentUser?.usuario });
   return { id: Number(id) };
